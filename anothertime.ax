@@ -1,0 +1,163 @@
+# @name    anothertime
+# @desc    Always see time and other widgets
+# @author  toinux@gmail.com
+# @version 1.0
+import math
+var PI = 3.14159265
+
+#time
+var tad = 1000 # time animation duration
+var ta = 'scroll' # 'scroll' or 'fade'
+
+def digits(h, m)
+  return [h / 10, h % 10, m / 10, m % 10]
+end
+
+def previous_time(h, m)
+  var pm = m - 1
+  var ph = h
+  if pm < 0
+    pm = 59
+    ph = h - 1
+    if ph < 0
+      ph = 23
+    end
+  end
+  return [ph, pm]
+end
+
+class MyApp
+  var n
+  var ticks
+  var cur
+  var old
+
+  def init()           # once, when the app is loaded
+    self.n = store.get("count", 0)
+    # todo : ici self.ticks se met Ã  0 au moment de l'init,
+    # il faut mettre une valeur qui correspond bien car on n'arrive
+    # jamais pile au dÃ©but de la premiÃ¨re minute
+    self.ticks = 0
+    self.calculate_cur_prev()
+  end
+
+  def loop()           # ~1x/s, also while the app is hidden
+    self.n = self.n + 1
+  end
+  
+  def calculate_cur_prev()
+      var h = hour()
+      var m = minute()
+      self.cur = digits(h, m)
+      var prev = previous_time(h, m)
+      self.old = digits(prev[0], prev[1])
+  end
+
+  def pad(v)
+    if v < 10 return "0" + str(v) end
+    return str(v)
+  end
+  
+  def fade_color(color, a)
+    var r = (color >> 16) & 0xFF
+    var g = (color >> 8) & 0xFF
+    var b = color & 0xFF
+    return rgb(r * a / 255, g * a / 255, b * a / 255)
+  end
+
+  def draw_time()
+    var ems = epoch_ms()
+    var sec = second()
+    var xpos = 0
+    var ypos = 6
+
+    # separator
+    var frac = (ems % 1000) / 1000.0
+    var sepcolor = nil
+    if sec % 2 > 0
+      var pct = (math.cos(2 * PI * frac + PI) + 1) * 0.5
+      sepcolor = self.fade_color(settings.get("textColor"), int(pct * 255))
+      text(xpos + 8,ypos,":",sepcolor)
+    end
+    
+    # digits
+    var mms = ems % 60000
+    if mms < tad
+      var pct = real(mms) / tad
+      for i : 0 .. 3
+        if self.cur[i] != self.old[i]
+          # ici animation
+          
+          if (ta == 'scroll')
+            # scroll
+            var spos = int(pct * 8)
+            text(xpos,ypos + spos - 8,str(self.cur[i]),0xFFFFFF)
+            text(xpos,ypos + spos,str(self.old[i]),0xFFFFFF)
+          else
+            # fade
+            var digitToPrint = (pct < 0.5) ? self.old[i] : self.cur[i]
+            var c = self.fade_color(settings.get("textColor"), int((math.cos(2 * PI * pct) + 1) * 0.5 * 255))
+            text(xpos,ypos,str(digitToPrint),c)
+          end
+
+        else
+          text(xpos,ypos,str(self.cur[i]),0xFFFFFF)
+        end
+        xpos += 4
+        if i == 1
+          # ici on decale si separateur
+          xpos += 2
+        end
+      end
+    else
+      text(0,6,self.pad(hour()),0xFFFFFF)
+      text(10,6,self.pad(minute()),0xFFFFFF)
+    end
+  end
+  
+def draw_seconds()
+  var secw = 17 # nombre de pixels Ã  afficher
+  var ms_elapsed = epoch_ms() % 60000  # ms Ã©coulÃ©es depuis le dÃ©but de la minute
+
+  var valeur = (ms_elapsed * secw) / 59000.0  # Ã©quivalent flottant de ta formule d'origine
+  var filled = int(valeur)
+  var pct = valeur - filled
+
+  # pixels pleins
+  for i : 0 .. filled - 1
+    pixel(i, 7, 0xFF00FF)
+  end
+
+  # pixel partiellement rempli
+  if filled < secw
+    pixel(filled, 7, self.fade_color(0xFF00FF, int(pct * 255)))
+  end
+end
+
+  def draw()           # every frame while visible - REQUIRED
+    self.ticks += 1
+    if second() == 0 && self.ticks > 500
+      # todo : en profiter pour dÃ©clarer et rÃ©initialiser ici 
+      # le nb de ms depuis la premiÃ¨re minute
+      # et self.ticks > 500 c'est pas terrible, mÃ©moriser la derniÃ¨re minute
+      # et comparer
+      self.ticks = 0
+      self.calculate_cur_prev()
+    end
+    
+    clear()
+    # text(19,6,str(self.ticks),0xFFFFFF)
+    self.draw_time()
+    self.draw_seconds()
+  end
+
+  def on_button(btn)   # "select" | "left" | "right"
+    if btn == "select"
+      self.n = 0
+      store.set("count", self.n)
+    end
+  end
+end
+
+
+return MyApp()
