@@ -2,21 +2,17 @@
 # @desc    Always see time and other widgets
 # @author  toinux@gmail.com
 # @version 1.0
+# @config  sc  color  "Seconds color"      default=#FF00FF
+# @config  ta  select "Time animation" options=scroll,fade default=fade
+# @config  tad  slider "Time animation duration" min=100 max=5000 default=500
 import math
 var PI = 3.14159265
 
-#time
-var tad = 500 # time animation duration
-var ta = 'scroll' # 'scroll' or 'fade'
-
-#seconds
-var sc = 0xFF00FF # color of seconds bar
-
 # widgets
 var widgets = [
-      {"name": "date", "duration": 5},
-      {"name": "temperature", "duration": 4},
-      {"name": "humidity", "duration": 4}
+      {"name": "date", "duration": 2},
+      {"name": "temperature", "duration": 6},
+      {"name": "humidity", "duration": 2}
     ]
 
 def digits(h, m)
@@ -125,13 +121,14 @@ class MyApp
     
     # digits
     var mms = ems % 60000
+    var tad = store.get("tad")
     if mms < tad
       var pct = real(mms) / tad
       for i : 0 .. 3
         if self.cur[i] != self.old[i]
           # ici animation
           
-          if (ta == 'scroll')
+          if (store.get("ta") == 'scroll')
             # scroll
             var spos = int(pct * 8)
             text(xpos,ypos + spos - 8,str(self.cur[i]),tc)
@@ -159,6 +156,7 @@ class MyApp
   end
   
 def draw_seconds()
+  var sc = store.get("sc")
   var secw = 17 # nombre de pixels à afficher
   var ms_elapsed = epoch_ms() % 60000  # ms écouées depuis le début de la minute
 
@@ -191,14 +189,12 @@ end
       var grey = self.fade_color(0x8B898C,pct)
       var blue = self.fade_color(0x0036FF,pct)
       
-      pixel(ox+1, oy,   grey)  pixel(ox+3, oy,   grey)
-      pixel(ox,   oy+1, blue) pixel(ox+1, oy+1, grey) pixel(ox+2, oy+1, blue)
-      pixel(ox+3, oy+1, grey) pixel(ox+4, oy+1, blue)
-      for x : 0 .. 4  pixel(ox+x, oy+2, blue)  end
-      for x : 0 .. 4  pixel(ox+x, oy+3, white) end
-      pixel(ox, oy+4, white) pixel(ox+1, oy+4, grey) pixel(ox+2, oy+4, white)
-      pixel(ox+3, oy+4, grey) pixel(ox+4, oy+4, white)
-      for x : 0 .. 4  pixel(ox+x, oy+5, white) end
+    rect_fill(ox, oy+1, 5, 2, blue)
+    rect_fill(ox, oy+3, 5, 3, white)
+    line(ox+1, oy, ox+1, oy+1, grey)
+    line(ox+3, oy, ox+3, oy+1, grey)
+    pixel(ox+1, oy+4, grey)
+    pixel(ox+3, oy+4, grey)
 
       letter = str(day())
     elif name == "temperature"
@@ -206,13 +202,12 @@ end
 
      var red = self.fade_color(0xFF4C50,pct)
     pixel(ox+2, oy, white)
-    pixel(ox+1, oy+1, white) pixel(ox+3, oy+1, white)
-    pixel(ox+1, oy+2, white) pixel(ox+2, oy+2, red) pixel(ox+3, oy+2, white)
-    pixel(ox, oy+3, white) pixel(ox+1, oy+3, red) pixel(ox+2, oy+3, red)
-    pixel(ox+3, oy+3, red) pixel(ox+4, oy+3, white)
-    pixel(ox, oy+4, white) pixel(ox+1, oy+4, red) pixel(ox+2, oy+4, red)
-    pixel(ox+3, oy+4, red) pixel(ox+4, oy+4, white)
-    pixel(ox+1, oy+5, white) pixel(ox+2, oy+5, white) pixel(ox+3, oy+5, white)
+    line(ox+1, oy+1, ox+1, oy+2, white)
+    line(ox+3, oy+1, ox+3, oy+2, white)
+    pixel(ox+2, oy+2, red)
+    rect_fill(ox, oy+3, 5, 2, white)
+    rect_fill(ox+1, oy+3, 3, 2, red)
+    rect_fill(ox+1, oy+5, 3, 1, white)
 
       letter = str(sensor.temperature())
     elif name == "humidity"
