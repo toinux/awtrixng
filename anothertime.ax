@@ -178,15 +178,63 @@ def draw_seconds()
 end
 
   def draw_widget(name, offset, pct)
+
+      var ox=19
+      var oy=offset
+
+      var white = self.fade_color(0xFFFFFF,pct)
+
     var letter = "?"
     if name == "date"
-      icon("bluecalendar", 19, 0)
+      
+      
+      var grey = self.fade_color(0x8B898C,pct)
+      var blue = self.fade_color(0x0036FF,pct)
+      
+      pixel(ox+1, oy,   grey)  pixel(ox+3, oy,   grey)
+      pixel(ox,   oy+1, blue) pixel(ox+1, oy+1, grey) pixel(ox+2, oy+1, blue)
+      pixel(ox+3, oy+1, grey) pixel(ox+4, oy+1, blue)
+      for x : 0 .. 4  pixel(ox+x, oy+2, blue)  end
+      for x : 0 .. 4  pixel(ox+x, oy+3, white) end
+      pixel(ox, oy+4, white) pixel(ox+1, oy+4, grey) pixel(ox+2, oy+4, white)
+      pixel(ox+3, oy+4, grey) pixel(ox+4, oy+4, white)
+      for x : 0 .. 4  pixel(ox+x, oy+5, white) end
+
       letter = str(day())
     elif name == "temperature"
-      icon("temperaturesmall", 19, 0)
+      
+
+     var red = self.fade_color(0xFF4C50,pct)
+    pixel(ox+2, oy, white)
+    pixel(ox+1, oy+1, white) pixel(ox+3, oy+1, white)
+    pixel(ox+1, oy+2, white) pixel(ox+2, oy+2, red) pixel(ox+3, oy+2, white)
+    pixel(ox, oy+3, white) pixel(ox+1, oy+3, red) pixel(ox+2, oy+3, red)
+    pixel(ox+3, oy+3, red) pixel(ox+4, oy+3, white)
+    pixel(ox, oy+4, white) pixel(ox+1, oy+4, red) pixel(ox+2, oy+4, red)
+    pixel(ox+3, oy+4, red) pixel(ox+4, oy+4, white)
+    pixel(ox+1, oy+5, white) pixel(ox+2, oy+5, white) pixel(ox+3, oy+5, white)
+
       letter = str(sensor.temperature())
     elif name == "humidity"
-      icon("smallhumidity", 19, 0)
+      
+
+          var l  = self.fade_color(0xD5F6FF,pct)
+          var m1 =  self.fade_color(0xBDF3FF,pct)
+          var m2 = self.fade_color(0x62E2FF,pct)
+          var m3 = self.fade_color(0x40DAFE,pct)
+          var d1 = self.fade_color(0x00AEFF,pct)
+          var d2 = self.fade_color(0x0089CD,pct)
+          var w = white
+      
+    pixel(ox+2, oy, l)
+    pixel(ox+2, oy+1, m1)
+    pixel(ox+1, oy+2, w) pixel(ox+2, oy+2, m1) pixel(ox+3, oy+2, m2)
+    pixel(ox, oy+3, w) pixel(ox+1, oy+3, m1) pixel(ox+2, oy+3, m1)
+    pixel(ox+3, oy+3, m2) pixel(ox+4, oy+3, d1)
+    pixel(ox, oy+4, w) pixel(ox+1, oy+4, m2) pixel(ox+2, oy+4, m2)
+    pixel(ox+3, oy+4, m3) pixel(ox+4, oy+4, d2)
+    pixel(ox+1, oy+5, d1) pixel(ox+2, oy+5, d1) pixel(ox+3, oy+5, d2)
+
       letter = str(sensor.humidity())
     end
     text(25, 6, letter, self.fade_color(0xFFFFFF, pct))
@@ -210,7 +258,7 @@ end
     end
   end
 
-  def draw()           # every frame while visible - REQUIRED
+  def draw()
     self.ticks += 1
     if second() == 0 && self.ticks > 500
       # todo : en profiter pour déclarer et réinitialiser ici 
@@ -236,6 +284,5 @@ end
     end
   end
 end
-
 
 return MyApp()
