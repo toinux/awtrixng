@@ -4,7 +4,7 @@
 # @version 1.0
 # @config  sc  color  "Seconds color"      default=#FF00FF
 # @config  ta  select "Time animation" options=scroll,fade default=fade
-# @config  tad  slider "Time animation duration" min=100 max=5000 default=500
+# @config  tad  slider "Time animation duration" min=100 max=5000 default=500 unit=ms
 import math
 var PI = 3.14159265
 
@@ -19,7 +19,7 @@ def digits(h, m)
   return [h / 10, h % 10, m / 10, m % 10]
 end
 
-def previous_time(h, m)
+def previous_digits(h, m)
   var pm = m - 1
   var ph = h
   if pm < 0
@@ -29,13 +29,12 @@ def previous_time(h, m)
       ph = 23
     end
   end
-  return [ph, pm]
+  return digits(ph, pm)
 end
 
 class MyApp
-  var n
   var cur
-  var old
+  var prev
   var ticks
 
   var widgets              # liste ordonnée {name, duration} (duration en secondes)
@@ -47,12 +46,7 @@ class MyApp
   var transition_duration_ms  # durée de la transition en ms
 
   def init()           # once, when the app is loaded
-    self.n = store.get("count", 0)
-    # todo : ici self.ticks se met à 0 au moment de l'init,
-    # il faut mettre une valeur qui correspond bien car on n'arrive
-    # jamais pile au début de la première minute
-    self.ticks = 0
-    self.calculate_cur_prev()
+    self.cur=[nil, nil, nil, nil]
 
     self.index = 0
     self.current_widget = widgets[0]["name"]
@@ -64,7 +58,6 @@ class MyApp
   end
 
   def loop()           # ~1x/s, also while the app is hidden
-    self.n = self.n + 1
 
      if self.wticks <= 0
       self.previous_widget = self.current_widget
@@ -81,8 +74,7 @@ class MyApp
       var h = hour()
       var m = minute()
       self.cur = digits(h, m)
-      var prev = previous_time(h, m)
-      self.old = digits(prev[0], prev[1])
+      self.prev = previous_digits(h, m)
   end
 
   def pad(v)
@@ -125,17 +117,17 @@ class MyApp
     if mms < tad
       var pct = real(mms) / tad
       for i : 0 .. 3
-        if self.cur[i] != self.old[i]
+        if self.cur[i] != self.prev[i]
           # ici animation
           
-          if (store.get("ta") == 'scroll')
+          if (store.get("ta") == "scroll")
             # scroll
             var spos = int(pct * 8)
             text(xpos,ypos + spos - 8,str(self.cur[i]),tc)
-            text(xpos,ypos + spos,str(self.old[i]),tc)
+            text(xpos,ypos + spos,str(self.prev[i]),tc)
           else
             # fade
-            var digitToPrint = (pct < 0.5) ? self.old[i] : self.cur[i]
+            var digitToPrint = (pct < 0.5) ? self.prev[i] : self.cur[i]
             var c = self.fade_color(tc, (math.cos(2 * PI * pct) + 1) * 0.5)
             text(xpos,ypos,str(digitToPrint),c)
           end
@@ -254,30 +246,19 @@ end
   end
 
   def draw()
-    self.ticks += 1
-    if second() == 0 && self.ticks > 500
-      # todo : en profiter pour déclarer et réinitialiser ici 
-      # le nb de ms depuis la première minute
-      # et self.ticks > 500 c'est pas terrible, mémoriser la dernière minute
-      # et comparer
-      self.ticks = 0
+
+    if minute() % 10 != self.cur[3]
       self.calculate_cur_prev()
     end
+
     
     clear()
-    # text(19,6,str(self.ticks),0xFFFFFF)
     self.draw_time()
     self.draw_seconds()
     self.draw_widgets()
 
   end
 
-  def on_button(btn)   # "select" | "left" | "right"
-    if btn == "select"
-      self.n = 0
-      store.set("count", self.n)
-    end
-  end
 end
 
 return MyApp()
