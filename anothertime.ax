@@ -12,6 +12,13 @@ var ta = 'scroll' # 'scroll' or 'fade'
 #seconds
 var sc = 0xFF00FF # color of seconds bar
 
+# widgets
+var widgets = [
+      {"name": "date", "duration": 5},
+      {"name": "temperature", "duration": 4},
+      {"name": "humidity", "duration": 4}
+    ]
+
 def digits(h, m)
   return [h / 10, h % 10, m / 10, m % 10]
 end
@@ -31,9 +38,17 @@ end
 
 class MyApp
   var n
-  var ticks
   var cur
   var old
+  var ticks
+
+  var widgets              # liste ordonnée {name, duration} (duration en secondes)
+  var index                # index du widget courant dans la liste
+  var current_widget       # nom du widget affiché en ce moment
+  var previous_widget      # nom du widget affiché juste avant (pour la transition)
+  var wticks                # compte à rebours (en secondes, via loop()) avant le prochain switch
+  var transition_start_ms  # instant (now_ms) du début de transition, nil si aucune en cours
+  var transition_duration_ms  # durée de la transition en ms
 
   def init()           # once, when the app is loaded
     self.n = store.get("count", 0)
@@ -42,10 +57,28 @@ class MyApp
     # jamais pile au début de la première minute
     self.ticks = 0
     self.calculate_cur_prev()
+
+    self.index = 0
+    self.current_widget = widgets[0]["name"]
+    self.previous_widget = nil
+    self.wticks = widgets[0]["duration"]
+    self.transition_start_ms = nil
+    self.transition_duration_ms = 1000     # <- durée de la transition, ajustable
+
   end
 
   def loop()           # ~1x/s, also while the app is hidden
     self.n = self.n + 1
+
+     if self.wticks <= 0
+      self.previous_widget = self.current_widget
+      self.index = (self.index + 1) % size(widgets)
+      self.current_widget = widgets[self.index]["name"]
+      self.wticks = widgets[self.index]["duration"]
+      self.transition_start_ms = epoch_ms()
+    end
+    self.wticks -= 1
+
   end
   
   def calculate_cur_prev()
@@ -144,6 +177,39 @@ def draw_seconds()
   end
 end
 
+  def draw_widget(name, offset, pct)
+    var letter = "?"
+    if name == "date"
+      icon("bluecalendar", 19, 0)
+      letter = str(day())
+    elif name == "temperature"
+      icon("temperaturesmall", 19, 0)
+      letter = str(sensor.temperature())
+    elif name == "humidity"
+      icon("smallhumidity", 19, 0)
+      letter = str(sensor.humidity())
+    end
+    text(25, 6, letter, self.fade_color(0xFFFFFF, pct))
+  end
+
+  def draw_widgets()
+    if self.transition_start_ms != nil
+      var elapsed = epoch_ms() - self.transition_start_ms
+      if elapsed >= self.transition_duration_ms
+        self.transition_start_ms = nil
+        self.draw_widget(self.current_widget, 0, 1.0)
+      else
+        var pct = elapsed * 1.0 / self.transition_duration_ms   # 0 -> 1
+
+        var widgetToPrint = (pct < 0.5) ? self.previous_widget : self.current_widget
+        self.draw_widget(widgetToPrint, 0, (math.cos(2 * PI * pct) + 1) * 0.5)
+        
+      end
+    else
+      self.draw_widget(self.current_widget, 0, 1.0)
+    end
+  end
+
   def draw()           # every frame while visible - REQUIRED
     self.ticks += 1
     if second() == 0 && self.ticks > 500
@@ -159,6 +225,8 @@ end
     # text(19,6,str(self.ticks),0xFFFFFF)
     self.draw_time()
     self.draw_seconds()
+    self.draw_widgets()
+
   end
 
   def on_button(btn)   # "select" | "left" | "right"
