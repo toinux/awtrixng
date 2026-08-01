@@ -31,8 +31,6 @@ class MyApp
   var day_label
 
   def init()
-    self.cur = [0, 0, 0, 0]
-    self.prev = [0, 0, 0, 0]
     self.cur = ["0", "0", "0", "0"]
     self.prev = ["0", "0", "0", "0"]
     self.cur_min = nil
