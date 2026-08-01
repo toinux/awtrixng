@@ -5,6 +5,10 @@
 # @config  sc  color  "Seconds color"              default=#FF00FF
 # @config  ta  select "Time animation" options=scroll,fade default=fade
 # @config  tad slider "Time animation duration" min=100 max=5000 default=500 unit=ms
+# @config  wsty select "Week style"        default=dotted2 options=large,progress,dotted,dotted2
+# @config  wc    color  "Week days color"  default=#00FFFF
+# @config  wdc   color  "Current day color" default=#FF00FF
+# @config  ssun  bool   "Week starts Sunday" default=false
 
 import math
 
@@ -17,6 +21,8 @@ class MyApp
   var index, wticks
   var current_widget, previous_widget
   var transition_start_ms, transition_duration_ms
+
+  var week_style, week_color, day_color, start_sunday # style et couleurs de la semaine (lues une seule fois)
 
   var sc, ta, tad         # config mise en cache (lue une seule fois)
   var tc                  # couleur de l'heure (peut changer via les settings)
@@ -48,6 +54,11 @@ class MyApp
     self.tad = store.get("tad")
     self.tc = settings.get("timeColor")
     if self.tc == nil self.tc = settings.get("textColor") end
+
+    self.week_style = store.get("wsty")
+    self.week_color = store.get("wc")
+    self.day_color = store.get("wdc")
+    self.start_sunday = store.get("ssun")
 
     self.temp_label = nil
     self.hum_label = nil
@@ -207,6 +218,43 @@ class MyApp
     text(ox + 6, 6, v, self.fade_color(0xFFFFFF, pct))
   end
 
+  def draw_week()
+    var wd = self.start_sunday ? weekday() : (weekday() + 6) % 7   # 0 = premier jour de semaine
+    var xpos = 18
+
+    if self.week_style == "large"
+      line(xpos, 7, 31, 7, self.week_color)
+      line(xpos + wd * 2, 7, xpos + wd * 2 + 1, 7, self.day_color)
+
+    elif self.week_style == "progress"
+      line(xpos, 7, 31, 7, self.week_color)
+      line(xpos, 7, xpos + wd * 2 + 1, 7, self.day_color)
+
+    elif self.week_style == "dotted"
+      line(xpos, 7, 31, 7, 0x000000)
+      var i = 0
+      while i < 7
+        pixel(xpos + i * 2, 7, i == wd ? self.day_color : self.week_color)
+        i += 1
+      end
+
+    elif self.week_style == "dotted2"
+      line(xpos, 7, 31, 7, 0x000000)
+      var i = 0
+      var x = xpos
+      while i < 7
+        if i == wd
+          line(x, 7, x + 1, 7, self.day_color)
+          x += 3
+        else
+          pixel(x, 7, self.week_color)
+          x += 2
+        end
+        i += 1
+      end
+    end
+  end
+
   def draw()
     if minute() != self.cur_min
       self.calculate_cur_prev()
@@ -215,6 +263,7 @@ class MyApp
     clear()
     self.draw_time()
     self.draw_seconds()
+    self.draw_week()
 
     if self.transition_start_ms != nil
       var elapsed = epoch_ms() - self.transition_start_ms
@@ -224,7 +273,7 @@ class MyApp
       else
         var pct = elapsed * 1.0 / self.transition_duration_ms
         var w = (pct < 0.5) ? self.previous_widget : self.current_widget
-        self.draw_widget(w, (math.cos(2 * 3.14159265 * pct) + 1) * 0.5)
+        self.draw_widget(w, (math.cos(2 * math.pi * pct) + 1) * 0.5)
       end
     else
       self.draw_widget(self.current_widget, 1.0)
