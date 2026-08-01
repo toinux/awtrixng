@@ -10,6 +10,7 @@ import math
 
 class MyApp
   var cur, prev   # digits courants/précédents
+  var hh, mm      # heure et minute courantes (pour éviter de recalculer à chaque draw())
   var cur_min
 
   var widgets            # liste {name, duration} construite une fois
@@ -82,6 +83,9 @@ class MyApp
     var m = minute()
     self.cur = [str(h / 10), str(h % 10), str(m / 10), str(m % 10)]
 
+    self.hh = self.cur[0] + self.cur[1]
+    self.mm = self.cur[2] + self.cur[3]
+
     var pm = m - 1
     var ph = h
     if pm < 0 pm = 59 ph = (h - 1 < 0) ? 23 : h - 1 end
@@ -92,6 +96,7 @@ class MyApp
 
   def fade_color(color, pct)
     if color == nil return self.fade_color(0xFFFFFF, pct) end
+    if pct >= 1.0 return color end
     var r = (color >> 16) & 0xFF
     var g = (color >> 8) & 0xFF
     var b = color & 0xFF
@@ -105,7 +110,7 @@ class MyApp
 
     if second() % 2 > 0
       var frac = (ems % 1000) / 1000.0
-      var pct = (math.cos(2 * 3.14159265 * frac + 3.14159265) + 1) * 0.5
+      var pct = (math.cos(2 * math.pi * frac + math.pi) + 1) * 0.5
       text(xpos + 8, ypos, ":", self.fade_color(self.tc, pct))
     end
 
@@ -121,7 +126,7 @@ class MyApp
             text(xpos, ypos + spos, self.prev[i], self.tc)
           else
             var s = (pct < 0.5) ? self.prev[i] : self.cur[i]
-            text(xpos, ypos, s, self.fade_color(self.tc, (math.cos(2 * 3.14159265 * pct) + 1) * 0.5))
+            text(xpos, ypos, s, self.fade_color(self.tc, (math.cos(2 * math.pi * pct) + 1) * 0.5))
           end
         else
           text(xpos, ypos, self.cur[i], self.tc)
@@ -131,9 +136,8 @@ class MyApp
         i += 1
       end
     else
-      var mm = self.cur[2] + self.cur[3]
-      text(0, 6, self.cur[0] + self.cur[1], self.tc)
-      text(10, 6, mm, self.tc)
+      text(0, 6, self.hh, self.tc)
+      text(10, 6, self.mm, self.tc)
     end
   end
 
