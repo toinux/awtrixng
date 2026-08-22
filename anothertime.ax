@@ -4,11 +4,13 @@
 # @version 1.0
 # @config  sc  color  "Seconds color"              default=#FF00FF
 # @config  ta  select "Time animation" options=scroll,fade default=fade
-# @config  tad slider "Time animation duration" min=100 max=5000 default=500 unit=ms
+# @config  tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
 # @config  wsty select "Week style"        default=dotted2 options=large,progress,dotted,dotted2
 # @config  wc    color  "Week days color"  default=#00FFFF
 # @config  wdc   color  "Current day color" default=#FF00FF
 # @config  ssun  bool   "Week starts Sunday" default=false
+# @config  wa  select "Widgets animation" options=scroll,fade default=fade
+# @config  wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
 
 import math
 
@@ -24,7 +26,7 @@ class MyApp
 
   var week_style, week_color, day_color, start_sunday # style et couleurs de la semaine (lues une seule fois)
 
-  var sc, ta, tad         # config mise en cache (lue une seule fois)
+  var sc, ta, tad, wa, wad         # config mise en cache (lue une seule fois)
   var tc                  # couleur de l'heure (peut changer via les settings)
 
   var temp_label, hum_label   # libellés capteurs, construits en loop()
@@ -45,7 +47,8 @@ class MyApp
     self.previous_widget = nil
     self.wticks = self.widgets[0]["duration"]
     self.transition_start_ms = nil
-    self.transition_duration_ms = 1000
+    self.wa = store.get("wa")
+    self.wad = store.get("wad")
 
     self.sc = store.get("sc")
     self.ta = store.get("ta")
@@ -112,64 +115,8 @@ class MyApp
     return rgb(int(r * pct), int(g * pct), int(b * pct))
   end
 
-  def draw_time()
-    var ems = epoch_ms()
-    var xpos = 0
-    var ypos = 6
-
-    if second() % 2 > 0
-      var frac = (ems % 1000) / 1000.0
-      var pct = (math.cos(2 * math.pi * frac + math.pi) + 1) * 0.5
-      text(xpos + 8, ypos, ":", self.fade_color(self.tc, pct))
-    end
-
-    var mms = ems % 60000
-    if mms < self.tad
-      var pct = real(mms) / self.tad
-      var i = 0
-      while i < 4
-        if self.cur[i] != self.prev[i]
-          if self.ta == "scroll"
-            var spos = int(pct * 8)
-            text(xpos, ypos + spos - 8, self.cur[i], self.tc)
-            text(xpos, ypos + spos, self.prev[i], self.tc)
-          else
-            var s = (pct < 0.5) ? self.prev[i] : self.cur[i]
-            text(xpos, ypos, s, self.fade_color(self.tc, (math.cos(2 * math.pi * pct) + 1) * 0.5))
-          end
-        else
-          text(xpos, ypos, self.cur[i], self.tc)
-        end
-        xpos += 4
-        if i == 1 xpos += 2 end
-        i += 1
-      end
-    else
-      text(0, 6, self.hh, self.tc)
-      text(10, 6, self.mm, self.tc)
-    end
-  end
-
-  def draw_seconds()
-    var secw = 17
-    var ms_elapsed = epoch_ms() % 60000
-    var valeur = (ms_elapsed * secw) / 59000.0
-    var filled = int(valeur)
-    var pct = valeur - filled
-
-    var i = 0
-    while i < filled
-      pixel(i, 7, self.sc)
-      i += 1
-    end
-    if filled < secw
-      pixel(filled, 7, self.fade_color(self.sc, pct))
-    end
-  end
-
-  def draw_widget(name, pct)
-    var ox = width() - 13
-    var oy = 0
+  def draw_widget(name, pct, oy)
+    var ox = 19
     var white = self.fade_color(0xFFFFFF, pct)
     var v = "?"
 
@@ -213,12 +160,103 @@ class MyApp
       v = self.hum_label
     end
 
-    text(ox + 6, 6, v, self.fade_color(0xFFFFFF, pct))
+    text(ox + 6, oy + 6, v, self.fade_color(0xFFFFFF, pct))
   end
 
-  def draw_week()
+  def draw()
+    if minute() != self.cur_min
+      self.calculate_cur_prev()
+    end
+
+    clear()
+
+    var ems = epoch_ms()
+    var mms = ems % 60000     # milliseconds elapsed in current minute
+    
+    #################
+    # draw time
+    #################
+    var xpos = 0
+    var ypos = 6
+
+    if second() % 2 > 0
+      var frac = (ems % 1000) / 1000.0
+      var pct = (math.cos(2 * math.pi * frac + math.pi) + 1) * 0.5
+      text(xpos + 8, ypos, ":", self.fade_color(self.tc, pct))
+    end
+
+
+    if mms < self.tad
+      var pct = real(mms) / self.tad
+      for i:0..3
+        if self.cur[i] != self.prev[i]
+          if self.ta == "scroll"
+            var spos = int(pct * 8)
+            text(xpos, ypos + spos - 8, self.cur[i], self.tc)
+            text(xpos, ypos + spos, self.prev[i], self.tc)
+          else
+            var s = (pct < 0.5) ? self.prev[i] : self.cur[i]
+            text(xpos, ypos, s, self.fade_color(self.tc, (math.cos(2 * math.pi * pct) + 1) * 0.5))
+          end
+        else
+          text(xpos, ypos, self.cur[i], self.tc)
+        end
+        xpos += 4
+        if i == 1 xpos += 2 end
+      end
+    else
+      text(0, 6, self.hh, self.tc)
+      text(10, 6, self.mm, self.tc)
+    end
+
+
+
+    #################
+    # draw seconds
+    #################
+    var secw = 17
+    var valeur = (mms * secw) / 59000.0
+    var filled = int(valeur)
+    var pct = valeur - filled
+
+    for i:0..filled - 1
+      pixel(i, 7, self.sc)
+    end
+    if filled < secw
+      pixel(filled, 7, self.fade_color(self.sc, pct))
+    end
+
+    #################
+    # draw widgets
+    #################
+    if self.transition_start_ms != nil
+      var elapsed = ems - self.transition_start_ms
+      if elapsed >= self.wad
+        self.transition_start_ms = nil
+        self.draw_widget(self.current_widget, 1.0, 0)
+      else
+        var pct = elapsed * 1.0 / self.wad
+
+        if self.wa == "scroll"
+          # anination scroll
+          var spos = int(pct * 8)
+          self.draw_widget(self.current_widget, 1, spos - 8)
+          self.draw_widget(self.previous_widget, 1, spos)
+        else
+          # animation fade
+          self.draw_widget((pct < 0.5) ? self.previous_widget : self.current_widget, (math.cos(2 * math.pi * pct) + 1) * 0.5, 0)
+        end
+
+      end
+    else
+      self.draw_widget(self.current_widget, 1.0, 0)
+    end
+
+    #################
+    # draw week
+    #################
     var wd = self.start_sunday ? weekday() : (weekday() + 6) % 7   # 0 = premier jour de semaine
-    var xpos = 18
+    xpos = 18
 
     if self.week_style == "large"
       line(xpos, 7, 31, 7, self.week_color)
@@ -251,32 +289,10 @@ class MyApp
         i += 1
       end
     end
+
   end
 
-  def draw()
-    if minute() != self.cur_min
-      self.calculate_cur_prev()
-    end
 
-    clear()
-    self.draw_time()
-    self.draw_seconds()
-    self.draw_week()
-
-    if self.transition_start_ms != nil
-      var elapsed = epoch_ms() - self.transition_start_ms
-      if elapsed >= self.transition_duration_ms
-        self.transition_start_ms = nil
-        self.draw_widget(self.current_widget, 1.0)
-      else
-        var pct = elapsed * 1.0 / self.transition_duration_ms
-        var w = (pct < 0.5) ? self.previous_widget : self.current_widget
-        self.draw_widget(w, (math.cos(2 * math.pi * pct) + 1) * 0.5)
-      end
-    else
-      self.draw_widget(self.current_widget, 1.0)
-    end
-  end
 
 end
 
