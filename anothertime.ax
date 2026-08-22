@@ -29,8 +29,8 @@ class MyApp
   var sc, ta, tad, wa, wad         # config mise en cache (lue une seule fois)
   var tc                  # couleur de l'heure (peut changer via les settings)
 
-  var temp_label, hum_label   # libellés capteurs, construits en loop()
-  var day_label
+  var temp, hum   # libellés capteurs, construits en loop()
+  var day
 
   def init()
     self.cur = ["0", "0", "0", "0"]
@@ -61,9 +61,9 @@ class MyApp
     self.day_color = store.get("wdc")
     self.start_sunday = store.get("ssun")
 
-    self.temp_label = nil
-    self.hum_label = nil
-    self.day_label = str(day())
+    self.temp = nil
+    self.hum = nil
+    self.day = str(day())
   end
 
   def loop()
@@ -79,11 +79,11 @@ class MyApp
 
     # sensors
     var t = sensor.temperature()
-    self.temp_label = t == nil ? "--" : str(round(t, 1))
+    self.temp = t == nil ? "?" : str(round(t))
     var hmd = sensor.humidity()
-    self.hum_label = hmd == nil ? "--" : str(round(hmd))
+    self.hum = hmd == nil ? "?" : str(round(hmd))
     
-    self.day_label = str(day())
+    self.day = str(day())
 
     # settings susceptibles de changer sans redémarrer l'app
     var newtc = settings.get("timeColor")
@@ -118,7 +118,7 @@ class MyApp
   def draw_widget(name, pct, oy)
     var ox = 19
     var white = self.fade_color(0xFFFFFF, pct)
-    var v = "?"
+    var v = ""
 
     if name == "date"
       var grey = self.fade_color(0x8B898C, pct)
@@ -129,7 +129,7 @@ class MyApp
       line(ox + 3, oy, ox + 3, oy + 1, grey)
       pixel(ox + 1, oy + 4, grey)
       pixel(ox + 3, oy + 4, grey)
-      v = self.day_label
+      v = self.day
 
     elif name == "temperature"
       var red = self.fade_color(0xFF4C50, pct)
@@ -140,7 +140,7 @@ class MyApp
       rect_fill(ox, oy + 3, 5, 2, white)
       rect_fill(ox + 1, oy + 3, 3, 2, red)
       rect_fill(ox + 1, oy + 5, 3, 1, white)
-      v = self.temp_label
+      v = self.temp
 
     elif name == "humidity"
       var l = self.fade_color(0xD5F6FF, pct)
@@ -157,10 +157,15 @@ class MyApp
       pixel(ox, oy + 4, white) pixel(ox + 1, oy + 4, m2) pixel(ox + 2, oy + 4, m2)
       pixel(ox + 3, oy + 4, m3) pixel(ox + 4, oy + 4, d2)
       pixel(ox + 1, oy + 5, d1) pixel(ox + 2, oy + 5, d1) pixel(ox + 3, oy + 5, d2)
-      v = self.hum_label
+      v = self.hum
     end
 
-    text(ox + 6, oy + 6, v, self.fade_color(0xFFFFFF, pct))
+      var c = self.fade_color(0xFFFFFF, pct)
+      if size(v) > 2
+        scroll_text(ox + 6, oy + 6, 6, v, c, {"mode": "bounce", "speed": 40})
+      else
+        text(ox + 6, oy + 6, v, c)
+      end
   end
 
   def draw()
@@ -291,7 +296,6 @@ class MyApp
     end
 
   end
-
 
 
 end
