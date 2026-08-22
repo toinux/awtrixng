@@ -11,6 +11,7 @@
 # @config  ssun  bool   "Week starts Sunday" default=false
 # @config  wa  select "Widgets animation" options=scroll,fade default=fade
 # @config  wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
+# @config  btopic text "Battery topic" default=""
 
 import math
 
@@ -29,7 +30,9 @@ class MyApp
   var sc, ta, tad, wa, wad         # config mise en cache (lue une seule fois)
   var tc                  # couleur de l'heure (peut changer via les settings)
 
-  var temp, hum   # libellés capteurs, construits en loop()
+  var temp, hum, lbat   # libellés capteurs, construits en loop()
+  var mbat # boolean pour savoir si on a un topic mqtt pour la batterie
+  var bat # valeur de la batterie (0-100) ou -1 si non disponible
   var day
 
   def init()
@@ -37,11 +40,13 @@ class MyApp
     self.prev = ["0", "0", "0", "0"]
     self.cur_min = nil
 
-    self.widgets = [
-      {"name": "date", "duration": 2},
-      {"name": "temperature", "duration": 6},
-      {"name": "humidity", "duration": 2}
-    ]
+   self.widgets = [
+     {"name": "date", "duration": 2},
+     {"name": "temperature", "duration": 6},
+     {"name": "humidity", "duration": 2},
+     {"name": "battery", "duration": 2}
+   ]
+
     self.index = 0
     self.current_widget = self.widgets[0]["name"]
     self.previous_widget = nil
@@ -64,6 +69,19 @@ class MyApp
     self.temp = nil
     self.hum = nil
     self.day = str(day())
+
+    var btopic = store.get("btopic")
+    if btopic != nil && size(btopic) > 0
+      mqtt.subscribe(btopic, / t, p -> self.setbat(p))
+      self.mbat = true
+    else
+      self.mbat = false
+    end
+  end
+
+  def setbat(b)
+    self.bat = b == nil ? -1 : num(b)
+    self.lbat = self.bat < 0 ? "?" : str(self.bat)
   end
 
   def loop()
@@ -82,7 +100,12 @@ class MyApp
     self.temp = t == nil ? "?" : str(round(t))
     var hmd = sensor.humidity()
     self.hum = hmd == nil ? "?" : str(round(hmd))
-    
+
+    # on ne lit la batterie depuis le sensor que si on n'a pas de topic mqtt pour ça
+    if !self.mbat
+      self.setbat(sensor.battery())
+    end
+
     self.day = str(day())
 
     # settings susceptibles de changer sans redémarrer l'app
@@ -142,6 +165,18 @@ class MyApp
       rect_fill(ox + 1, oy + 5, 3, 1, white)
       v = self.temp
 
+    elif name == "battery"
+      var green = self.fade_color(0x00FF00, pct)
+      rect(ox, oy, 5, 6, white)
+      pixel(ox, oy, 0x000000)
+      pixel(ox+4, oy, 0x000000)
+      for i:1..4
+        if self.bat > (100 - 25 * i)
+          line(ox + 1, oy + i, ox + 3, oy + i, green)
+        end
+      end
+      v = self.lbat
+
     elif name == "humidity"
       var l = self.fade_color(0xD5F6FF, pct)
       var m1 = self.fade_color(0xBDF3FF, pct)
@@ -151,12 +186,16 @@ class MyApp
       var d2 = self.fade_color(0x0089CD, pct)
       pixel(ox + 2, oy, l)
       pixel(ox + 2, oy + 1, m1)
-      pixel(ox + 1, oy + 2, white) pixel(ox + 2, oy + 2, m1) pixel(ox + 3, oy + 2, m2)
-      pixel(ox, oy + 3, white) pixel(ox + 1, oy + 3, m1) pixel(ox + 2, oy + 3, m1)
-      pixel(ox + 3, oy + 3, m2) pixel(ox + 4, oy + 3, d1)
-      pixel(ox, oy + 4, white) pixel(ox + 1, oy + 4, m2) pixel(ox + 2, oy + 4, m2)
-      pixel(ox + 3, oy + 4, m3) pixel(ox + 4, oy + 4, d2)
-      pixel(ox + 1, oy + 5, d1) pixel(ox + 2, oy + 5, d1) pixel(ox + 3, oy + 5, d2)
+      rect_fill(ox + 1, oy + 2, 3, 3, m2)
+      rect_fill(ox + 1, oy + 2, 2, 2, m1)
+      pixel(ox + 1, oy + 2, l)
+      line(ox, oy + 3, ox , oy + 4, white)
+      pixel(ox + 4, oy + 3, d1)
+      pixel(ox + 1, oy + 2, white)
+      pixel(ox + 3, oy + 4, m3)
+      pixel(ox + 4, oy + 4, d2)
+      line(ox + 1, oy + 5, ox + 2, oy + 5, d1) pixel(ox + 3, oy + 5, d2)
+
       v = self.hum
     end
 
