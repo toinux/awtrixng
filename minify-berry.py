@@ -15,19 +15,33 @@ are left exactly as written):
      they are read by the firmware to build the app list and settings UI.
   2. Removes leading/trailing whitespace on every line.
   3. Collapses runs of internal spaces/tabs down to a single space.
-  4. Drops now-empty lines.
+  4. Drops the (now single) space entirely when it sits next to a
+     "safe" punctuation character: ( ) [ ] { } , ; :
+     These characters are never part of an identifier, a number or a
+     multi-char operator, so removing the space beside them can never
+     merge two tokens into a different one (unlike, say, collapsing
+     "a - -1" into "a--1" next to an operator, which this script does
+     NOT do, on purpose).
+  5. Drops now-empty lines.
 
 It does NOT try to join everything onto one line or remove newlines:
 Berry statements are newline-separated (blocks are closed with `end`,
 not by indentation), so collapsing across lines is not needed for size
-and would risk merging tokens. This script only removes bytes that
-carry no meaning, and is safe to run on any valid Berry source.
+and would risk merging tokens. It also does NOT touch whitespace around
+operators (=, +, -, *, /, ==, &&, ->, .., ...) or around `.`, since
+those characters combine into different multi-char tokens or interact
+with number literals, and the size win is not worth the risk.
 
 Assumption: no multi-line string literals (none appear anywhere in the
 AWTRIX Berry API/doc, and the language reference gives no syntax for
 them). If a script ever uses one, treat that file as unsupported.
 """
 import sys
+
+# Punctuation next to which a space can always be dropped without any
+# risk of merging tokens: none of these combine with a neighbouring
+# character to form a different operator or literal.
+NO_SPACE_CHARS = set("(){}[],;:")
 
 
 def _is_meta_comment(line: str) -> bool:
@@ -40,7 +54,7 @@ def _is_meta_comment(line: str) -> bool:
 
 
 def _process_line(line: str) -> str:
-    """Strip a real comment and collapse whitespace, respecting strings."""
+    """Strip a real comment and collapse/drop whitespace, respecting strings."""
     out = []
     in_str = None       # None, or the active quote character
     pending_space = False
@@ -61,7 +75,7 @@ def _process_line(line: str) -> str:
             continue
 
         if c == '"' or c == "'":
-            if pending_space and out:
+            if pending_space and out and out[-1] not in NO_SPACE_CHARS:
                 out.append(' ')
             pending_space = False
             in_str = c
@@ -77,7 +91,16 @@ def _process_line(line: str) -> str:
             i += 1
             continue
 
-        if pending_space and out:
+        if c in NO_SPACE_CHARS:
+            # drop any space pending before this punctuation, and don't
+            # let a space be re-added after it either (handled below via
+            # the out[-1] check when the next real char is emitted)
+            pending_space = False
+            out.append(c)
+            i += 1
+            continue
+
+        if pending_space and out and out[-1] not in NO_SPACE_CHARS:
             out.append(' ')
         pending_space = False
         out.append(c)
