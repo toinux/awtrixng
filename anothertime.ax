@@ -1,17 +1,19 @@
-# @name    anothertime
-# @desc    Always see time and other widgets
-# @author  toinux@gmail.com
-# @version 1.0
-# @config  sc  color  "Seconds color"              default=#FF00FF
-# @config  ta  select "Time animation" options=scroll,fade default=fade
-# @config  tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
-# @config  wsty select "Week style"        default=dotted2 options=large,progress,dotted,dotted2
-# @config  wc    color  "Week days color"  default=#00FFFF
-# @config  wdc   color  "Current day color" default=#FF00FF
-# @config  ssun  bool   "Week starts Sunday" default=false
-# @config  wa  select "Widgets animation" options=scroll,fade default=fade
-# @config  wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
-# @config  btopic text "Battery topic" default=""
+# @name anothertime
+# @desc Always see time and other widgets
+# @author toinux@gmail.com
+# @version 1.1
+# @config sc color "Seconds color" default=#FF00FF
+# @config ta select "Time animation" options=scroll,fade default=fade
+# @config tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
+# @config wsty select "Week style" default=dotted2 options=large,progress,dotted,dotted2
+# @config wc color "Week days color" default=#00FFFF
+# @config wdc color "Current day color" default=#FF00FF
+# @config ssun bool "Week starts Sunday" default=false
+# @config wa select "Widgets animation" options=scroll,fade default=fade
+# @config wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
+# @config btopic text "Battery topic" default=""
+# @config wdur slider "Widget duration" default=2 min=1 max=30 unit=s
+# @config wlist text "Widgets" default="date,temperature,humidity,battery" help="ex: date,temperature@5,humidity,date@4,battery" maxlen=200
 
 import math
 
@@ -21,6 +23,7 @@ class MyApp
   var cur_min
 
   var widgets            # liste {name, duration} construite une fois
+  var wdur                # durée par défaut d'un widget, mise en cache
   var index, wticks
   var current_widget, previous_widget
   var transition_start_ms, transition_duration_ms
@@ -35,17 +38,33 @@ class MyApp
   var bat # valeur de la batterie (0-100) ou -1 si non disponible
   var day
 
+  def parse_widgets()
+    var result = []
+    var raw = store.get("wlist")
+
+    if raw != nil
+      for t : re.matchall("[^,]+", raw)
+        var m = re.match("(date|temperature|humidity|battery)(@([0-9]+))?$", t)
+        if m != nil
+          result.push({"name": m[1],
+                       "duration": m[3] == nil ? self.wdur : clamp(num(m[3], self.wdur), 1, 60)})
+        end
+      end
+    end
+
+    if size(result) == 0
+      result.push({"name": "date", "duration": self.wdur})
+    end
+    return result
+  end
+
   def init()
     self.cur = ["0", "0", "0", "0"]
     self.prev = ["0", "0", "0", "0"]
     self.cur_min = nil
 
-   self.widgets = [
-     {"name": "date", "duration": 2},
-     {"name": "temperature", "duration": 6},
-     {"name": "humidity", "duration": 2},
-     {"name": "battery", "duration": 2}
-   ]
+    self.wdur = store.get("wdur")
+    self.widgets = self.parse_widgets()
 
     self.index = 0
     self.current_widget = self.widgets[0]["name"]
@@ -66,8 +85,10 @@ class MyApp
     self.day_color = store.get("wdc")
     self.start_sunday = store.get("ssun")
 
-    self.temp = nil
-    self.hum = nil
+    self.temp = "?"
+    self.hum = "?"
+    self.lbat = "?"
+    self.bat = -1
     self.day = str(day())
 
     var btopic = store.get("btopic")
@@ -87,11 +108,16 @@ class MyApp
   def loop()
     # rotation des widgets
     if self.wticks <= 0
-      self.previous_widget = self.current_widget
-      self.index = (self.index + 1) % size(self.widgets)
-      self.current_widget = self.widgets[self.index]["name"]
-      self.wticks = self.widgets[self.index]["duration"]
-      self.transition_start_ms = epoch_ms()
+      if size(self.widgets) > 1
+        self.previous_widget = self.current_widget
+        self.index = (self.index + 1) % size(self.widgets)
+        self.current_widget = self.widgets[self.index]["name"]
+        self.wticks = self.widgets[self.index]["duration"]
+        self.transition_start_ms = epoch_ms()
+      else
+        # un seul widget : pas de transition, on relance juste le compte à rebours
+        self.wticks = self.widgets[0]["duration"]
+      end
     end
     self.wticks -= 1
 
