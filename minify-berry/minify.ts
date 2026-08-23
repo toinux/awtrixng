@@ -20,6 +20,13 @@ export interface MinifyOptions {
    * is left untouched and the rename would break it. Default false.
    */
   renameMembers?: boolean;
+  /**
+   * Merge consecutive `var` field declarations at class body level into a
+   * single statement (`var a,b` + `var c` -> `var a,b,c`). Only merges
+   * declarations with no initializer, since class fields can't have one.
+   * Default true.
+   */
+  mergeVarDecls?: boolean;
 }
 
 export interface RenameEntry {
@@ -556,15 +563,138 @@ function emit(
   return { text, renames: [...seen.values()] };
 }
 
+/**
+ * Merge consecutive `var` field declarations at class body level into one
+ * statement: `var a, b\nvar c\nvar d, e` -> `var a,b,c,d,e`.
+ *
+ * Only touches declarations directly in a class body (not inside a method
+ * or block) and only when neither has an initializer — class fields can't
+ * have one, so seeing `=` there means this isn't a plain field list and the
+ * run is left alone for safety. Runs on the raw token stream, tracking
+ * block nesting the same way `analyze()` does, before scope analysis.
+ */
+function mergeClassVarDecls(tokens: Token[]): Token[] {
+  type Kind = "module" | "class" | "function" | "block";
+  const stack: Kind[] = ["module"];
+  const top = (): Kind => stack[stack.length - 1]!;
+
+  const out: Token[] = [];
+  let i = 0;
+
+  while (i < tokens.length) {
+    const t = tokens[i]!;
+
+    if (t.kind === "keyword" && t.value === "var" && top() === "class") {
+      const names: string[] = [];
+      let j = i;
+      let clean = true;
+
+      while (
+        j < tokens.length &&
+        tokens[j]!.kind === "keyword" &&
+        tokens[j]!.value === "var"
+      ) {
+        let k = j + 1;
+        while (k < tokens.length && isTrivia(tokens[k]!)) k += 1;
+
+        let gotOne = false;
+        while (k < tokens.length && tokens[k]!.kind === "ident") {
+          names.push(tokens[k]!.value);
+          gotOne = true;
+          k += 1;
+          while (k < tokens.length && isTrivia(tokens[k]!)) k += 1;
+          if (tokens[k]?.kind === "punct" && tokens[k]?.value === ",") {
+            k += 1;
+            while (k < tokens.length && isTrivia(tokens[k]!)) k += 1;
+            continue;
+          }
+          break;
+        }
+        if (!gotOne || (tokens[k]?.kind === "punct" && tokens[k]?.value === "=")) {
+          clean = false;
+          break;
+        }
+
+        let m = k;
+        while (m < tokens.length && isTrivia(tokens[m]!)) m += 1;
+        if (tokens[m]?.kind === "keyword" && tokens[m]?.value === "var") {
+          j = m; // another var follows directly: keep extending the run
+        } else {
+          j = k;
+          break;
+        }
+      }
+
+      if (clean && names.length > 0) {
+        out.push({ kind: "keyword", value: "var" });
+        out.push({ kind: "space", value: " " });
+        names.forEach((n, idx) => {
+          if (idx > 0) out.push({ kind: "punct", value: "," });
+          out.push({ kind: "ident", value: n });
+        });
+        out.push({ kind: "newline", value: "\n" });
+        i = j;
+        continue;
+      }
+      // Not a clean run (e.g. an initializer showed up) — fall through and
+      // copy this "var" token normally; nesting tracking below still runs.
+    }
+
+    if (t.kind === "keyword") {
+      switch (t.value) {
+        case "class":
+          stack.push("class");
+          break;
+        case "def":
+          stack.push("function");
+          break;
+        case "for":
+        case "if":
+        case "while":
+        case "try":
+          stack.push("block");
+          break;
+        case "do": {
+          let p = out.length - 1;
+          while (p >= 0 && isTrivia(out[p]!)) p -= 1;
+          const prev = p >= 0 ? out[p]! : null;
+          const attached =
+            prev?.kind === "keyword" &&
+            (prev.value === "if" ||
+              prev.value === "while" ||
+              prev.value === "for" ||
+              prev.value === "elif" ||
+              prev.value === "else" ||
+              prev.value === "except");
+          if (!attached) stack.push("block");
+          break;
+        }
+        case "end":
+          if (stack.length > 1) stack.pop();
+          break;
+        default:
+          break;
+      }
+    }
+
+    out.push(t);
+    i += 1;
+  }
+
+  return out;
+}
+
 export function minifyBerry(source: string, opts: MinifyOptions = {}): MinifyReport {
   const options: Required<MinifyOptions> = {
     renameLocals: opts.renameLocals ?? true,
     renameClasses: opts.renameClasses ?? true,
     joinLines: opts.joinLines ?? true,
     renameMembers: opts.renameMembers ?? false,
+    mergeVarDecls: opts.mergeVarDecls ?? true,
   };
 
-  const tokens = tokenize(source);
+  let tokens = tokenize(source);
+  if (options.mergeVarDecls) tokens = mergeClassVarDecls(tokens);
   const { root, identScope, isModule } = analyze(tokens);
 
   if (options.renameLocals || options.renameClasses || options.renameMembers) {
