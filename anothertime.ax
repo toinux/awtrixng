@@ -1,7 +1,7 @@
 # @name Anothertime
 # @desc Always see time and other widgets
 # @author toinux@gmail.com
-# @version 1.1
+# @version 1.2
 # @config sc color "Seconds color" default=#FF00FF
 # @config ta select "Time animation" options=scroll,fade default=fade
 # @config tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
