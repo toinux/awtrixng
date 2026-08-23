@@ -6,12 +6,21 @@
 //
 // Options:
 //   --variables   renomme les locales, paramètres, boucles for, alias d'import
+//                 ET les variables de classe (var déclarées au niveau de la
+//                 classe, accédées via self.champ)
 //   --classes     renomme les classes et fonctions top-level
 //   --lines       compacte le corps sur un minimum de lignes
 //   --full        équivaut à --variables --classes --lines
 //
 // Sans option, seuls les commentaires et les espaces superflus sont retirés
 // (aucun renommage, aucune fusion de lignes).
+//
+// Limite du renommage des variables de classe : seuls les accès écrits
+// littéralement `self.champ` sont réécrits. Si une instance est passée à
+// une fonction et que son champ est lu via une autre variable (ex.
+// `def helper(w) return w.url end`), cet accès n'est pas renommé et le
+// script minifié sera cassé — à vérifier après minification si ce genre
+// de motif est présent dans le code.
 //
 // La sortie minifiée est écrite sur stdout ; les infos (octets économisés,
 // renommages) sont écrites sur stderr, pour ne pas polluer une redirection
@@ -42,7 +51,9 @@ for (const f of flags) {
 }
 
 const full = flags.has("--full");
-const renameLocals = full || flags.has("--variables");
+const variables = full || flags.has("--variables");
+const renameLocals = variables;
+const renameMembers = variables;
 const renameClasses = full || flags.has("--classes");
 const joinLines = full || flags.has("--lines");
 
@@ -55,7 +66,12 @@ try {
   process.exit(1);
 }
 
-const report = minifyBerry(source, { renameLocals, renameClasses, joinLines });
+const report = minifyBerry(source, {
+  renameLocals,
+  renameClasses,
+  joinLines,
+  renameMembers,
+});
 
 process.stdout.write(report.compacted);
 

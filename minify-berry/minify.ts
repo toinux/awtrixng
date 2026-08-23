@@ -13,12 +13,19 @@ export interface MinifyOptions {
   renameClasses?: boolean;
   /** Join the body onto as few lines as possible. Default true. */
   joinLines?: boolean;
+  /**
+   * Rename `var` fields declared at class body level (e.g. `self.url`).
+   * Only literal `self.<field>` accesses are rewritten — if the instance
+   * is aliased into another variable and accessed that way, that access
+   * is left untouched and the rename would break it. Default false.
+   */
+  renameMembers?: boolean;
 }
 
 export interface RenameEntry {
   from: string;
   to: string;
-  kind: "local" | "class" | "function" | "alias";
+  kind: "local" | "class" | "function" | "alias" | "member";
 }
 
 export interface MinifyReport {
@@ -97,6 +104,21 @@ function prevCode(tokens: Token[], i: number): number {
 function isAfterDot(tokens: Token[], i: number): boolean {
   const p = prevCode(tokens, i - 1);
   return p >= 0 && tokens[p]!.kind === "punct" && tokens[p]!.value === ".";
+}
+
+/**
+ * True for `self . <ident>` — the only member-access shape we can safely
+ * rewrite, since we know statically which class's field table applies.
+ * Any other object before the dot (`store.get`, `w.url`, `Class.field`, ...)
+ * is left untouched: we can't tell what it refers to without type inference.
+ */
+function isAfterSelfDot(tokens: Token[], i: number): boolean {
+  const dot = prevCode(tokens, i - 1);
+  if (dot < 0 || tokens[dot]!.kind !== "punct" || tokens[dot]!.value !== ".") {
+    return false;
+  }
+  const obj = prevCode(tokens, dot - 1);
+  return obj >= 0 && tokens[obj]!.kind === "ident" && tokens[obj]!.value === "self";
 }
 
 function collectIdentsAfter(
@@ -266,7 +288,7 @@ function analyze(tokens: Token[]): Analysis {
         const inMethod = enclosingFunction(current).kind === "function";
         const cls = enclosingClass(current);
         if (cls && !inMethod) {
-          for (const n of names) bind(cls, n, false, "local");
+          for (const n of names) bind(cls, n, true, "member");
         } else {
           const target = enclosingFunction(current);
           for (const n of names) bind(target, n, true, "local");
@@ -464,18 +486,31 @@ function emit(
   identScope: (Scope | null)[],
   options: Required<MinifyOptions>,
 ): { text: string; renames: RenameEntry[] } {
-  const renameOn = options.renameLocals || options.renameClasses;
+  const renameOn = options.renameLocals || options.renameClasses || options.renameMembers;
   const seen = new Map<string, RenameEntry>();
   const parts: string[] = [];
   let last: Token | null = null;
 
   const mapped = (i: number, t: Token): string => {
     if (!renameOn || t.kind !== "ident") return t.value;
-    if (isAfterDot(tokens, i)) return t.value;
+
     const scope = identScope[i];
-    const b = lookup(scope ?? null, t.value);
+    let b: Binding | null;
+
+    if (isAfterDot(tokens, i)) {
+      // Only `self.field` is safe to rewrite: we know statically which
+      // class's field table applies. Anything else after a dot (module
+      // calls, other objects, chained access) is left untouched.
+      if (!isAfterSelfDot(tokens, i)) return t.value;
+      const cls = scope ? enclosingClass(scope) : null;
+      b = (cls && cls.bindings.get(t.value)) || null;
+    } else {
+      b = lookup(scope ?? null, t.value);
+    }
+
     if (!b || !b.rename || !b.short) return t.value;
     if (b.kind === "local" && !options.renameLocals) return t.value;
+    if (b.kind === "member" && !options.renameMembers) return t.value;
     if ((b.kind === "class" || b.kind === "function") && !options.renameClasses) {
       return t.value;
     }
@@ -526,12 +561,13 @@ export function minifyBerry(source: string, opts: MinifyOptions = {}): MinifyRep
     renameLocals: opts.renameLocals ?? true,
     renameClasses: opts.renameClasses ?? true,
     joinLines: opts.joinLines ?? true,
+    renameMembers: opts.renameMembers ?? false,
   };
 
   const tokens = tokenize(source);
   const { root, identScope, isModule } = analyze(tokens);
 
-  if (options.renameLocals || options.renameClasses) {
+  if (options.renameLocals || options.renameClasses || options.renameMembers) {
     const frozen = collectFrozenOriginals(tokens, root);
     assignShorts(root, frozen);
   }
