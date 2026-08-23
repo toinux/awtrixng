@@ -123,7 +123,7 @@ class MyApp
 
     # sensors
     var t = sensor.temperature()
-    self.temp = t == nil ? "?" : str(round(t))
+    self.temp = t == nil ? "?" : str(round(settings.get("useCelsius") ? t : (t * 1.8 + 32)))
     var hmd = sensor.humidity()
     self.hum = hmd == nil ? "?" : str(round(hmd))
 
