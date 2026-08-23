@@ -201,6 +201,8 @@ class MyApp
           line(ox + 1, oy + i, ox + 3, oy + i, green)
         end
       end
+      pixel(ox+1, oy+1, white)
+      pixel(ox+3, oy+1, white)
       v = self.lbat
 
     elif name == "humidity"
