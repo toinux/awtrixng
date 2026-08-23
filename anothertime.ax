@@ -5,6 +5,7 @@
 # @config sc color "Seconds color" default=#FF00FF
 # @config ta select "Time animation" options=scroll,fade default=fade
 # @config tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
+# @config dsty select "Date style" default=icon options=icon,calendar
 # @config wsty select "Week style" default=dotted2 options=large,progress,dotted,dotted2
 # @config wc color "Week days color" default=#00FFFF
 # @config wdc color "Current day color" default=#FF00FF
@@ -12,7 +13,6 @@
 # @config wa select "Widgets animation" options=scroll,fade default=fade
 # @config wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
 # @config btopic text "Battery topic" default=""
-# @config wdur slider "Widget duration" default=2 min=1 max=30 unit=s
 # @config wlist text "Widgets" default="date,temperature,humidity,battery" help="ex: date,temperature@5,humidity,date@4,battery" maxlen=200
 
 import math
@@ -31,12 +31,14 @@ class MyApp
   var week_style, week_color, day_color, start_sunday # style et couleurs de la semaine (lues une seule fois)
 
   var sc, ta, tad, wa, wad         # config mise en cache (lue une seule fois)
-  var tc                  # couleur de l'heure (peut changer via les settings)
+  var tc                  # text color from settings
 
   var temp, hum, lbat   # libellés capteurs, construits en loop()
   var mbat # boolean pour savoir si on a un topic mqtt pour la batterie
   var bat # valeur de la batterie (0-100) ou -1 si non disponible
-  var day
+  var day_n, day_s, dsty
+
+  var date_c, temp_c, hum_c, bat_c, ch_c, cb_c, ct_c # colors from settings
 
   def parse_widgets()
     var result = []
@@ -59,11 +61,15 @@ class MyApp
   end
 
   def init()
+
+    # update values (date, system settings, sensors ...)
+    self.update()
+
     self.cur = ["0", "0", "0", "0"]
     self.prev = ["0", "0", "0", "0"]
     self.cur_min = nil
 
-    self.wdur = store.get("wdur")
+    self.wdur = 3 # default widget duration in seconds, read once from settings
     self.widgets = self.parse_widgets()
 
     self.index = 0
@@ -77,20 +83,17 @@ class MyApp
     self.sc = store.get("sc")
     self.ta = store.get("ta")
     self.tad = store.get("tad")
-    self.tc = settings.get("timeColor")
-    if self.tc == nil self.tc = settings.get("textColor") end
-
+    
     self.week_style = store.get("wsty")
+    # week_color and day_color cannot be reachable by a flat key
     self.week_color = store.get("wc")
     self.day_color = store.get("wdc")
     self.start_sunday = store.get("ssun")
 
-    self.temp = "?"
-    self.hum = "?"
+    self.dsty = store.get("dsty")
+
     self.lbat = "?"
     self.bat = -1
-    self.day = str(day())
-
     var btopic = store.get("btopic")
     if btopic != nil && size(btopic) > 0
       mqtt.subscribe(btopic, / t, p -> self.setbat(p))
@@ -98,6 +101,36 @@ class MyApp
     else
       self.mbat = false
     end
+  end
+
+  def update()
+    
+    # sensors
+    var t = sensor.temperature()
+    self.temp = t == nil ? "?" : str(round(settings.get("useCelsius") ? t : (t * 1.8 + 32)))
+    var hmd = sensor.humidity()
+    self.hum = hmd == nil ? "?" : str(round(hmd))
+
+    # on ne lit la batterie depuis le sensor que si on n'a pas de topic mqtt pour ça
+    if !self.mbat
+      self.setbat(sensor.battery())
+    end
+
+    self.day_n = day()
+    self.day_s = str(self.day_n)
+    self.tc = self.getcolor("timeColor")
+    self.date_c = self.getcolor("dateColor")
+    self.temp_c = self.getcolor("temperatureColor")
+    self.hum_c = self.getcolor("humidityColor")
+    self.bat_c = self.getcolor("batteryColor")
+    self.ch_c = self.getcolor("calendarHeaderColor")
+    self.cb_c = self.getcolor("calendarBodyColor")
+    self.ct_c = self.getcolor("calendarTextColor")
+  end
+
+  def getcolor(name)
+    var c = settings.get(name)
+    return c == nil ? settings.get("textColor") : c
   end
 
   def setbat(b)
@@ -121,22 +154,8 @@ class MyApp
     end
     self.wticks -= 1
 
-    # sensors
-    var t = sensor.temperature()
-    self.temp = t == nil ? "?" : str(round(settings.get("useCelsius") ? t : (t * 1.8 + 32)))
-    var hmd = sensor.humidity()
-    self.hum = hmd == nil ? "?" : str(round(hmd))
-
-    # on ne lit la batterie depuis le sensor que si on n'a pas de topic mqtt pour ça
-    if !self.mbat
-      self.setbat(sensor.battery())
-    end
-
-    self.day = str(day())
-
-    # settings susceptibles de changer sans redémarrer l'app
-    var newtc = settings.get("timeColor")
-    self.tc = newtc == nil ? settings.get("textColor") : newtc
+    # update values
+    self.update()
   end
 
   def calculate_cur_prev()
@@ -166,34 +185,46 @@ class MyApp
 
   def draw_widget(name, pct, oy)
     var ox = 19
-    var white = self.fade_color(0xFFFFFF, pct)
+    var w = self.fade_color(0xFFFFFF, pct)
+    var c = self.tc
     var v = ""
 
     if name == "date"
-      var grey = self.fade_color(0x8B898C, pct)
-      var blue = self.fade_color(0x0036FF, pct)
-      rect_fill(ox, oy + 1, 5, 2, blue)
-      rect_fill(ox, oy + 3, 5, 3, white)
-      line(ox + 1, oy, ox + 1, oy + 1, grey)
-      line(ox + 3, oy, ox + 3, oy + 1, grey)
-      pixel(ox + 1, oy + 4, grey)
-      pixel(ox + 3, oy + 4, grey)
-      v = self.day
+      if self.dsty == "calendar"
+        c = self.ct_c
+        ox = 21
+        rect_fill(ox, oy, 11, 2, self.fade_color(self.ch_c, pct))
+        rect_fill(ox, oy+2, 11, 5, self.fade_color(self.cb_c,pct))
+        ox -= self.day_n < 10 ? 2 : 4
+      
+      else
+        var grey = self.fade_color(0x8B898C, pct)
+        var blue = self.fade_color(0x0036FF, pct)
+        rect_fill(ox, oy + 1, 5, 2, blue)
+        rect_fill(ox, oy + 3, 5, 3, w)
+        line(ox + 1, oy, ox + 1, oy + 1, grey)
+        line(ox + 3, oy, ox + 3, oy + 1, grey)
+        pixel(ox + 1, oy + 4, grey)
+        pixel(ox + 3, oy + 4, grey)
+        c = self.date_c
+      end
+     v = self.day_s
 
     elif name == "temperature"
       var red = self.fade_color(0xFF4C50, pct)
-      pixel(ox + 2, oy, white)
-      line(ox + 1, oy + 1, ox + 1, oy + 2, white)
-      line(ox + 3, oy + 1, ox + 3, oy + 2, white)
+      pixel(ox + 2, oy, w)
+      line(ox + 1, oy + 1, ox + 1, oy + 2, w)
+      line(ox + 3, oy + 1, ox + 3, oy + 2, w)
       pixel(ox + 2, oy + 2, red)
-      rect_fill(ox, oy + 3, 5, 2, white)
+      rect_fill(ox, oy + 3, 5, 2, w)
       rect_fill(ox + 1, oy + 3, 3, 2, red)
-      rect_fill(ox + 1, oy + 5, 3, 1, white)
+      rect_fill(ox + 1, oy + 5, 3, 1, w)
       v = self.temp
+      c = self.temp_c
 
     elif name == "battery"
       var green = self.fade_color(0x00FF00, pct)
-      rect(ox, oy, 5, 6, white)
+      rect(ox, oy, 5, 6, w)
       pixel(ox, oy, 0x000000)
       pixel(ox+4, oy, 0x000000)
       for i:1..4
@@ -201,9 +232,10 @@ class MyApp
           line(ox + 1, oy + i, ox + 3, oy + i, green)
         end
       end
-      pixel(ox+1, oy+1, white)
-      pixel(ox+3, oy+1, white)
+      pixel(ox+1, oy+1, w)
+      pixel(ox+3, oy+1, w)
       v = self.lbat
+      c = self.bat_c
 
     elif name == "humidity"
       var l = self.fade_color(0xD5F6FF, pct)
@@ -217,22 +249,23 @@ class MyApp
       rect_fill(ox + 1, oy + 2, 3, 3, m2)
       rect_fill(ox + 1, oy + 2, 2, 2, m1)
       pixel(ox + 1, oy + 2, l)
-      line(ox, oy + 3, ox , oy + 4, white)
+      line(ox, oy + 3, ox , oy + 4, w)
       pixel(ox + 4, oy + 3, d1)
-      pixel(ox + 1, oy + 2, white)
+      pixel(ox + 1, oy + 2, w)
       pixel(ox + 3, oy + 4, m3)
       pixel(ox + 4, oy + 4, d2)
       line(ox + 1, oy + 5, ox + 2, oy + 5, d1) pixel(ox + 3, oy + 5, d2)
-
       v = self.hum
+      c = self.hum_c
+
     end
 
-      var c = self.fade_color(0xFFFFFF, pct)
-      if size(v) > 2
-        scroll_text(ox + 6, oy + 6, 6, v, c, {"mode": "bounce", "speed": 40})
-      else
-        text(ox + 6, oy + 6, v, c)
-      end
+    var f = self.fade_color(c, pct)
+    if size(v) > 2
+      scroll_text(ox + 6, oy + 6, 6, v, f, {"mode": "bounce", "speed": 40})
+    else
+      text(ox + 6, oy + 6, v, f)
+    end
   end
 
   def draw()
