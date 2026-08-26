@@ -40,6 +40,8 @@ class MyApp
 
   var date_c, temp_c, hum_c, bat_c, ch_c, cb_c, ct_c # colors from settings
 
+  var sbed, seconds_end_start
+
   def parse_widgets()
     var result = []
     var raw = store.get("wlist")
@@ -83,6 +85,9 @@ class MyApp
     self.sc = store.get("sc")
     self.ta = store.get("ta")
     self.tad = store.get("tad")
+
+    self.sbed = 500  # durée de l'effet de fin des secondes (ms)
+    self.seconds_end_start = nil   # moment où on a déclenché l'effet de fin
     
     self.week_style = store.get("wsty")
     # week_color and day_color cannot be reachable by a flat key
@@ -320,9 +325,35 @@ class MyApp
     # draw seconds
     #################
     var secw = 17
-    var valeur = (mms * secw) / 59000.0
-    var filled = int(valeur)
-    var pct = valeur - filled
+
+    # Détection du passage de minute (on est dans les X dernières ms)
+    if mms >= 60000 - self.sbed && self.seconds_end_start == nil
+      self.seconds_end_start = ems
+    end
+
+    # Reset au début de la nouvelle minute
+    if mms < 100
+      self.seconds_end_start = nil
+    end
+
+    var filled = 0
+    var pct = 0.0
+
+    if self.seconds_end_start != nil
+      # effet rewind
+      var elapsed = ems - self.seconds_end_start
+      var t = clamp(elapsed * 1.0 / self.sbed, 0.0, 1.0)
+
+        var remaining = secw * (1.0 - t)
+        filled = int(remaining)
+        pct = remaining - filled
+
+    else
+      # comportement normal pendant la minute
+      var valeur = (mms * secw) / 59000.0
+      filled = int(valeur)
+      pct = valeur - filled
+    end
 
     for i:0..filled - 1
       pixel(i, 7, self.sc)
