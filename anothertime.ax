@@ -18,167 +18,176 @@
 import math
 
 class MyApp
-  var cur, prev   # digits courants/précédents
-  var hh, mm      # heure et minute courantes (pour éviter de recalculer à chaque draw())
-  var cur_min
+  var cur_digits, prev_digits   # current / previous time digits (4 chars: H H M M)
+  var hour_str, min_str         # current hour and minute as 2-char strings (avoids recompute in draw())
+  var built_for_min             # minute the digit arrays were built for; nil until the first build
 
-  var widgets            # liste {name, duration} construite une fois
-  var wdur                # durée par défaut d'un widget, mise en cache
-  var index, wticks
+  var widgets                   # parsed widget list [{name, duration}], built once in init()
+  var default_dur               # default widget dwell time in seconds (used when no @N suffix)
+  var widget_index, ticks_left  # position in the rotation + seconds left before the next rotation
   var current_widget, previous_widget
-  var transition_start_ms, transition_duration_ms
+  var transition_start_ms       # epoch when the widget transition started, nil when idle
 
-  var week_style, week_color, day_color, start_sunday # style et couleurs de la semaine (lues une seule fois)
+  var week_style, week_color, today_color, start_sunday  # week indicator style and colors (read once)
 
-  var sc, ta, tad, wa, wad         # config mise en cache (lue une seule fois)
-  var tc                  # text color from settings
+  var sec_color, time_anim, time_anim_dur, widget_anim, widget_anim_dur  # config values cached once in init()
+  var time_color                # text color from settings
 
-  var temp, hum, lbat   # libellés capteurs, construits en loop()
-  var mbat # boolean pour savoir si on a un topic mqtt pour la batterie
-  var bat # valeur de la batterie (0-100) ou -1 si non disponible
-  var day_n, day_s, dsty
+  var temp_str, hum_str, bat_str  # formatted sensor labels, rebuilt in loop()
+  var bat_from_mqtt             # true when the battery comes from the configured MQTT topic
+  var bat_level                 # battery value (0-100) or -1 when unavailable
+  var day_of_month, day_str, date_style
 
-  var date_c, temp_c, hum_c, bat_c, ch_c, cb_c, ct_c # colors from settings
+  var date_color, temp_color, hum_color, bat_color  # value colors from settings
+  var cal_header_color, cal_body_color, cal_text_color  # calendar block colors
 
-  var sbed, seconds_end_start
+  var sec_rewind_dur, sec_rewind_start  # end-of-minute rewind effect on the seconds bar
 
+  # Parse the wlist config string ("date,temperature@5,...") into a widget list.
+  # Falls back to a single date widget when the setting is empty or invalid.
   def parse_widgets()
-    var result = []
-    var raw = store.get("wlist")
+    var parsed = []
+    var wlist_raw = store.get("wlist")
 
-    if raw != nil
-      for t : re.matchall("[^,]+", raw)
-        var m = re.match("(date|temperature|humidity|battery)(@([0-9]+))?$", t)
-        if m != nil
-          result.push({"name": m[1],
-                       "duration": m[3] == nil ? self.wdur : clamp(num(m[3], self.wdur), 1, 60)})
+    if wlist_raw != nil
+      for entry : re.matchall("[^,]+", wlist_raw)
+        var widget_match = re.match("(date|temperature|humidity|battery)(@([0-9]+))?$", entry)
+        if widget_match != nil
+          parsed.push({"name": widget_match[1],
+                       "duration": widget_match[3] == nil ? self.default_dur : clamp(num(widget_match[3], self.default_dur), 1, 60)})
         end
       end
     end
 
-    if size(result) == 0
-      result.push({"name": "date", "duration": self.wdur})
+    if size(parsed) == 0
+      parsed.push({"name": "date", "duration": self.default_dur})
     end
-    return result
+    return parsed
   end
 
   def init()
 
-    # update values (date, system settings, sensors ...)
+    # prime date, system settings and sensors so the first draw has something to show
     self.update()
 
-    self.cur = ["0", "0", "0", "0"]
-    self.prev = ["0", "0", "0", "0"]
-    self.cur_min = nil
+    self.cur_digits = ["0", "0", "0", "0"]
+    self.prev_digits = ["0", "0", "0", "0"]
+    self.built_for_min = nil
 
-    self.wdur = 3 # default widget duration in seconds, read once from settings
+    self.default_dur = 3 # default widget dwell time in seconds
     self.widgets = self.parse_widgets()
 
-    self.index = 0
+    self.widget_index = 0
     self.current_widget = self.widgets[0]["name"]
     self.previous_widget = nil
-    self.wticks = self.widgets[0]["duration"]
+    self.ticks_left = self.widgets[0]["duration"]
     self.transition_start_ms = nil
-    self.wa = store.get("wa")
-    self.wad = store.get("wad")
+    self.widget_anim = store.get("wa")
+    self.widget_anim_dur = store.get("wad")
 
-    self.sc = store.get("sc")
-    self.ta = store.get("ta")
-    self.tad = store.get("tad")
+    self.sec_color = store.get("sc")
+    self.time_anim = store.get("ta")
+    self.time_anim_dur = store.get("tad")
 
-    self.sbed = 500  # durée de l'effet de fin des secondes (ms)
-    self.seconds_end_start = nil   # moment où on a déclenché l'effet de fin
-    
+    self.sec_rewind_dur = 500  # length of the end-of-minute rewind effect (ms)
+    self.sec_rewind_start = nil   # epoch when the rewind was armed, nil while idle
+
     self.week_style = store.get("wsty")
-    # week_color and day_color cannot be reachable by a flat key
+    # week_color / today_color are config colors in the app store, not settings colors,
+    # so they are not reachable through get_color() and are read directly
     self.week_color = store.get("wc")
-    self.day_color = store.get("wdc")
+    self.today_color = store.get("wdc")
     self.start_sunday = store.get("ssun")
 
-    self.dsty = store.get("dsty")
+    self.date_style = store.get("dsty")
 
-    self.lbat = "?"
-    self.bat = -1
-    var btopic = store.get("btopic")
-    if btopic != nil && size(btopic) > 0
-      mqtt.subscribe(btopic, / t, p -> self.setbat(p))
-      self.mbat = true
+    self.bat_str = "?"
+    self.bat_level = -1
+    var bat_topic = store.get("btopic")
+    if bat_topic != nil && size(bat_topic) > 0
+      mqtt.subscribe(bat_topic, / topic, payload -> self.set_battery(payload))
+      self.bat_from_mqtt = true
     else
-      self.mbat = false
+      self.bat_from_mqtt = false
     end
   end
 
   def update()
-    
-    # sensors
-    var t = sensor.temperature()
-    self.temp = t == nil ? "?" : str(round(settings.get("useCelsius") ? t : (t * 1.8 + 32)))
-    var hmd = sensor.humidity()
-    self.hum = hmd == nil ? "?" : str(round(hmd))
 
-    # on ne lit la batterie depuis le sensor que si on n'a pas de topic mqtt pour ça
-    if !self.mbat
-      self.setbat(sensor.battery())
+    # sensors
+    var raw_temp = sensor.temperature()
+    self.temp_str = raw_temp == nil ? "?" : str(round(settings.get("useCelsius") ? raw_temp : (raw_temp * 1.8 + 32)))
+    var raw_hum = sensor.humidity()
+    self.hum_str = raw_hum == nil ? "?" : str(round(raw_hum))
+
+    # only read the battery from the sensor when no MQTT topic provides it
+    if !self.bat_from_mqtt
+      self.set_battery(sensor.battery())
     end
 
-    self.day_n = day()
-    self.day_s = str(self.day_n)
-    self.tc = self.getcolor("timeColor")
-    self.date_c = self.getcolor("dateColor")
-    self.temp_c = self.getcolor("temperatureColor")
-    self.hum_c = self.getcolor("humidityColor")
-    self.bat_c = self.getcolor("batteryColor")
-    self.ch_c = self.getcolor("calendarHeaderColor")
-    self.cb_c = self.getcolor("calendarBodyColor")
-    self.ct_c = self.getcolor("calendarTextColor")
+    self.day_of_month = day()
+    self.day_str = str(self.day_of_month)
+    self.time_color = self.get_color("timeColor")
+    self.date_color = self.get_color("dateColor")
+    self.temp_color = self.get_color("temperatureColor")
+    self.hum_color = self.get_color("humidityColor")
+    self.bat_color = self.get_color("batteryColor")
+    self.cal_header_color = self.get_color("calendarHeaderColor")
+    self.cal_body_color = self.get_color("calendarBodyColor")
+    self.cal_text_color = self.get_color("calendarTextColor")
   end
 
-  def getcolor(name)
-    var c = settings.get(name)
-    return c == nil ? settings.get("textColor") : c
+  # system settings color, falling back to textColor when unset
+  def get_color(name)
+    var color = settings.get(name)
+    return color == nil ? settings.get("textColor") : color
   end
 
-  def setbat(b)
-    self.bat = b == nil ? -1 : num(b)
-    self.lbat = self.bat < 0 ? "?" : str(self.bat)
+  # battery value from sensor or MQTT payload: 0-100, -1 when unknown
+  def set_battery(value)
+    self.bat_level = value == nil ? -1 : num(value)
+    self.bat_str = self.bat_level < 0 ? "?" : str(self.bat_level)
   end
 
   def loop()
-    # rotation des widgets
-    if self.wticks <= 0
+    # widget rotation
+    if self.ticks_left <= 0
       if size(self.widgets) > 1
         self.previous_widget = self.current_widget
-        self.index = (self.index + 1) % size(self.widgets)
-        self.current_widget = self.widgets[self.index]["name"]
-        self.wticks = self.widgets[self.index]["duration"]
+        self.widget_index = (self.widget_index + 1) % size(self.widgets)
+        self.current_widget = self.widgets[self.widget_index]["name"]
+        self.ticks_left = self.widgets[self.widget_index]["duration"]
         self.transition_start_ms = epoch_ms()
       else
-        # un seul widget : pas de transition, on relance juste le compte à rebours
-        self.wticks = self.widgets[0]["duration"]
+        # single widget: no transition, just restart the countdown
+        self.ticks_left = self.widgets[0]["duration"]
       end
     end
-    self.wticks -= 1
+    self.ticks_left -= 1
 
     # update values
     self.update()
   end
 
-  def calculate_cur_prev()
-    var h = hour()
-    var m = minute()
-    self.cur = [str(h / 10), str(h % 10), str(m / 10), str(m % 10)]
+  # rebuild the current/previous digit arrays when the minute changes
+  def build_digits()
+    var cur_h = hour()
+    var cur_m = minute()
+    self.cur_digits = [str(cur_h / 10), str(cur_h % 10), str(cur_m / 10), str(cur_m % 10)]
 
-    self.hh = self.cur[0] + self.cur[1]
-    self.mm = self.cur[2] + self.cur[3]
+    self.hour_str = self.cur_digits[0] + self.cur_digits[1]
+    self.min_str = self.cur_digits[2] + self.cur_digits[3]
 
-    var pm = m - 1
-    var ph = h
-    if pm < 0 pm = 59 ph = (h - 1 < 0) ? 23 : h - 1 end
-    self.prev = [str(ph / 10), str(ph % 10), str(pm / 10), str(pm % 10)]
+    # previous minute (00 rolls back to 23), used as the animation source
+    var prev_m = cur_m - 1
+    var prev_h = cur_h
+    if prev_m < 0 prev_m = 59 prev_h = (cur_h - 1 < 0) ? 23 : cur_h - 1 end
+    self.prev_digits = [str(prev_h / 10), str(prev_h % 10), str(prev_m / 10), str(prev_m % 10)]
 
-    self.cur_min = m
+    self.built_for_min = cur_m
   end
 
+  # darken a color by pct (1.0 unchanged, 0.0 black); nil color falls back to white
   def fade_color(color, pct)
     if color == nil return self.fade_color(0xFFFFFF, pct) end
     if pct >= 1.0 return color end
@@ -188,101 +197,106 @@ class MyApp
     return rgb(int(r * pct), int(g * pct), int(b * pct))
   end
 
-  def draw_widget(name, pct, oy)
-    var ox = 19
-    var w = self.fade_color(0xFFFFFF, pct)
-    var c = self.tc
-    var v = ""
+  # draw widget `name` at (x, y); pct fades the whole widget (1 = fully visible)
+  def draw_widget(name, pct, y)
+    var x = 19
+    var white = self.fade_color(0xFFFFFF, pct)
+    var color = self.time_color
+    var value = ""
 
     if name == "date"
-      if self.dsty == "calendar"
-        c = self.ct_c
-        ox = 21
-        rect_fill(ox, oy, 11, 2, self.fade_color(self.ch_c, pct))
-        rect_fill(ox, oy+2, 11, 5, self.fade_color(self.cb_c,pct))
-        ox -= self.day_n < 10 ? 2 : 4
-      
+      if self.date_style == "calendar"
+        color = self.cal_text_color
+        x = 21
+        rect_fill(x, y, 11, 2, self.fade_color(self.cal_header_color, pct))
+        rect_fill(x, y+2, 11, 5, self.fade_color(self.cal_body_color, pct))
+        x -= self.day_of_month < 10 ? 2 : 4
+
       else
+        # classic icon: a small calendar page
         var grey = self.fade_color(0x8B898C, pct)
         var blue = self.fade_color(0x0036FF, pct)
-        rect_fill(ox, oy + 1, 5, 2, blue)
-        rect_fill(ox, oy + 3, 5, 3, w)
-        line(ox + 1, oy, ox + 1, oy + 1, grey)
-        line(ox + 3, oy, ox + 3, oy + 1, grey)
-        pixel(ox + 1, oy + 4, grey)
-        pixel(ox + 3, oy + 4, grey)
-        c = self.date_c
+        rect_fill(x, y + 1, 5, 2, blue)
+        rect_fill(x, y + 3, 5, 3, white)
+        line(x + 1, y, x + 1, y + 1, grey)
+        line(x + 3, y, x + 3, y + 1, grey)
+        pixel(x + 1, y + 4, grey)
+        pixel(x + 3, y + 4, grey)
+        color = self.date_color
       end
-     v = self.day_s
+      value = self.day_str
 
     elif name == "temperature"
+      # thermometer icon
       var red = self.fade_color(0xFF4C50, pct)
-      pixel(ox + 2, oy, w)
-      line(ox + 1, oy + 1, ox + 1, oy + 2, w)
-      line(ox + 3, oy + 1, ox + 3, oy + 2, w)
-      pixel(ox + 2, oy + 2, red)
-      rect_fill(ox, oy + 3, 5, 2, w)
-      rect_fill(ox + 1, oy + 3, 3, 2, red)
-      rect_fill(ox + 1, oy + 5, 3, 1, w)
-      v = self.temp
-      c = self.temp_c
+      pixel(x + 2, y, white)
+      line(x + 1, y + 1, x + 1, y + 2, white)
+      line(x + 3, y + 1, x + 3, y + 2, white)
+      pixel(x + 2, y + 2, red)
+      rect_fill(x, y + 3, 5, 2, white)
+      rect_fill(x + 1, y + 3, 3, 2, red)
+      rect_fill(x + 1, y + 5, 3, 1, white)
+      value = self.temp_str
+      color = self.temp_color
 
     elif name == "battery"
+      # battery cell, one green row per 25%
       var green = self.fade_color(0x00FF00, pct)
-      rect(ox, oy, 5, 6, w)
-      pixel(ox, oy, 0x000000)
-      pixel(ox+4, oy, 0x000000)
+      rect(x, y, 5, 6, white)
+      pixel(x, y, 0x000000)
+      pixel(x+4, y, 0x000000)
       for i:1..4
-        if self.bat > (100 - 25 * i)
-          line(ox + 1, oy + i, ox + 3, oy + i, green)
+        if self.bat_level > (100 - 25 * i)
+          line(x + 1, y + i, x + 3, y + i, green)
         end
       end
-      pixel(ox+1, oy+1, w)
-      pixel(ox+3, oy+1, w)
-      v = self.lbat
-      c = self.bat_c
+      pixel(x+1, y+1, white)
+      pixel(x+3, y+1, white)
+      value = self.bat_str
+      color = self.bat_color
 
     elif name == "humidity"
-      var l = self.fade_color(0xD5F6FF, pct)
-      var m1 = self.fade_color(0xBDF3FF, pct)
-      var m2 = self.fade_color(0x62E2FF, pct)
-      var m3 = self.fade_color(0x40DAFE, pct)
-      var d1 = self.fade_color(0x00AEFF, pct)
-      var d2 = self.fade_color(0x0089CD, pct)
-      pixel(ox + 2, oy, l)
-      pixel(ox + 2, oy + 1, m1)
-      rect_fill(ox + 1, oy + 2, 3, 3, m2)
-      rect_fill(ox + 1, oy + 2, 2, 2, m1)
-      pixel(ox + 1, oy + 2, l)
-      line(ox, oy + 3, ox , oy + 4, w)
-      pixel(ox + 4, oy + 3, d1)
-      pixel(ox + 1, oy + 2, w)
-      pixel(ox + 3, oy + 4, m3)
-      pixel(ox + 4, oy + 4, d2)
-      line(ox + 1, oy + 5, ox + 2, oy + 5, d1) pixel(ox + 3, oy + 5, d2)
-      v = self.hum
-      c = self.hum_c
+      # water drop, shades from light (top) to dark (bottom)
+      var drop_light = self.fade_color(0xD5F6FF, pct)
+      var drop_mid1 = self.fade_color(0xBDF3FF, pct)
+      var drop_mid2 = self.fade_color(0x62E2FF, pct)
+      var drop_mid3 = self.fade_color(0x40DAFE, pct)
+      var drop_dark1 = self.fade_color(0x00AEFF, pct)
+      var drop_dark2 = self.fade_color(0x0089CD, pct)
+      pixel(x + 2, y, drop_light)
+      pixel(x + 2, y + 1, drop_mid1)
+      rect_fill(x + 1, y + 2, 3, 3, drop_mid2)
+      rect_fill(x + 1, y + 2, 2, 2, drop_mid1)
+      pixel(x + 1, y + 2, drop_light)
+      line(x, y + 3, x , y + 4, white)
+      pixel(x + 4, y + 3, drop_dark1)
+      pixel(x + 1, y + 2, white)
+      pixel(x + 3, y + 4, drop_mid3)
+      pixel(x + 4, y + 4, drop_dark2)
+      line(x + 1, y + 5, x + 2, y + 5, drop_dark1) pixel(x + 3, y + 5, drop_dark2)
+      value = self.hum_str
+      color = self.hum_color
 
     end
 
-    var f = self.fade_color(c, pct)
-    if size(v) > 2
-      scroll_text(ox + 6, oy + 6, 6, v, f, {"mode": "bounce", "speed": 40})
+    var faded_color = self.fade_color(color, pct)
+    if size(value) > 2
+      scroll_text(x + 6, y + 6, 6, value, faded_color, {"mode": "bounce", "speed": 40})
     else
-      text(ox + 6, oy + 6, v, f)
+      text(x + 6, y + 6, value, faded_color)
     end
   end
 
   def draw()
-    if minute() != self.cur_min
-      self.calculate_cur_prev()
+    if minute() != self.built_for_min
+      self.build_digits()
     end
 
     clear()
 
-    var ems = epoch_ms()
-    var mms = ems % 60000     # milliseconds elapsed in current minute
-    
+    var now_epoch_ms = epoch_ms()
+    var ms_in_min = now_epoch_ms % 60000     # milliseconds elapsed in current minute
+
     #################
     # draw time
     #################
@@ -290,33 +304,35 @@ class MyApp
     var ypos = 6
 
     if second() % 2 > 0
-      var frac = (ems % 1000) / 1000.0
-      var pct = (math.cos(2 * math.pi * frac + math.pi) + 1) * 0.5
-      text(xpos + 8, ypos, ":", self.fade_color(self.tc, pct))
+      # blink the separator with a cosine pulse
+      var sec_frac = (now_epoch_ms % 1000) / 1000.0
+      var pct = (math.cos(2 * math.pi * sec_frac + math.pi) + 1) * 0.5
+      text(xpos + 8, ypos, ":", self.fade_color(self.time_color, pct))
     end
 
 
-    if mms < self.tad
-      var pct = real(mms) / self.tad
+    if ms_in_min < self.time_anim_dur
+      # minute just turned: animate the digits that changed
+      var pct = real(ms_in_min) / self.time_anim_dur
       for i:0..3
-        if self.cur[i] != self.prev[i]
-          if self.ta == "scroll"
-            var spos = int(pct * 8)
-            text(xpos, ypos + spos - 8, self.cur[i], self.tc)
-            text(xpos, ypos + spos, self.prev[i], self.tc)
+        if self.cur_digits[i] != self.prev_digits[i]
+          if self.time_anim == "scroll"
+            var scroll_y = int(pct * 8)
+            text(xpos, ypos + scroll_y - 8, self.cur_digits[i], self.time_color)
+            text(xpos, ypos + scroll_y, self.prev_digits[i], self.time_color)
           else
-            var s = (pct < 0.5) ? self.prev[i] : self.cur[i]
-            text(xpos, ypos, s, self.fade_color(self.tc, (math.cos(2 * math.pi * pct) + 1) * 0.5))
+            var shown = (pct < 0.5) ? self.prev_digits[i] : self.cur_digits[i]
+            text(xpos, ypos, shown, self.fade_color(self.time_color, (math.cos(2 * math.pi * pct) + 1) * 0.5))
           end
         else
-          text(xpos, ypos, self.cur[i], self.tc)
+          text(xpos, ypos, self.cur_digits[i], self.time_color)
         end
         xpos += 4
         if i == 1 xpos += 2 end
       end
     else
-      text(0, 6, self.hh, self.tc)
-      text(10, 6, self.mm, self.tc)
+      text(0, 6, self.hour_str, self.time_color)
+      text(10, 6, self.min_str, self.time_color)
     end
 
 
@@ -324,62 +340,62 @@ class MyApp
     #################
     # draw seconds
     #################
-    var secw = 17
+    var bar_len = 17
 
-    # Détection du passage de minute (on est dans les X dernières ms)
-    if mms >= 60000 - self.sbed && self.seconds_end_start == nil
-      self.seconds_end_start = ems
+    # arm the rewind effect during the last sec_rewind_dur ms of the minute
+    if ms_in_min >= 60000 - self.sec_rewind_dur && self.sec_rewind_start == nil
+      self.sec_rewind_start = now_epoch_ms
     end
 
-    # Reset au début de la nouvelle minute
-    if mms < 100
-      self.seconds_end_start = nil
+    # reset the flag right after the new minute starts
+    if ms_in_min < 100
+      self.sec_rewind_start = nil
     end
 
-    var filled = 0
+    var filled_px = 0
     var pct = 0.0
 
-    if self.seconds_end_start != nil
-      # effet rewind
-      var elapsed = ems - self.seconds_end_start
-      var t = clamp(elapsed * 1.0 / self.sbed, 0.0, 1.0)
+    if self.sec_rewind_start != nil
+      # rewind: drain the bar from full to empty over the effect duration
+      var elapsed = now_epoch_ms - self.sec_rewind_start
+      var rewind_pct = clamp(elapsed * 1.0 / self.sec_rewind_dur, 0.0, 1.0)
 
-        var remaining = secw * (1.0 - t)
-        filled = int(remaining)
-        pct = remaining - filled
+      var remaining_px = bar_len * (1.0 - rewind_pct)
+      filled_px = int(remaining_px)
+      pct = remaining_px - filled_px
 
     else
-      # comportement normal pendant la minute
-      var valeur = (mms * secw) / 59000.0
-      filled = int(valeur)
-      pct = valeur - filled
+      # normal: bar fills along with the seconds of the minute
+      var bar_progress = (ms_in_min * bar_len) / 59000.0
+      filled_px = int(bar_progress)
+      pct = bar_progress - filled_px
     end
 
-    for i:0..filled - 1
-      pixel(i, 7, self.sc)
+    for i:0..filled_px - 1
+      pixel(i, 7, self.sec_color)
     end
-    if filled < secw
-      pixel(filled, 7, self.fade_color(self.sc, pct))
+    if filled_px < bar_len
+      pixel(filled_px, 7, self.fade_color(self.sec_color, pct))
     end
 
     #################
     # draw widgets
     #################
     if self.transition_start_ms != nil
-      var elapsed = ems - self.transition_start_ms
-      if elapsed >= self.wad
+      var elapsed = now_epoch_ms - self.transition_start_ms
+      if elapsed >= self.widget_anim_dur
         self.transition_start_ms = nil
         self.draw_widget(self.current_widget, 1.0, 0)
       else
-        var pct = elapsed * 1.0 / self.wad
+        var pct = elapsed * 1.0 / self.widget_anim_dur
 
-        if self.wa == "scroll"
-          # anination scroll
-          var spos = int(pct * 8)
-          self.draw_widget(self.current_widget, 1, spos - 8)
-          self.draw_widget(self.previous_widget, 1, spos)
+        if self.widget_anim == "scroll"
+          # scroll animation: the new widget slides up from below
+          var scroll_y = int(pct * 8)
+          self.draw_widget(self.current_widget, 1, scroll_y - 8)
+          self.draw_widget(self.previous_widget, 1, scroll_y)
         else
-          # animation fade
+          # fade animation: crossfade around the midpoint
           self.draw_widget((pct < 0.5) ? self.previous_widget : self.current_widget, (math.cos(2 * math.pi * pct) + 1) * 0.5, 0)
         end
 
@@ -391,36 +407,36 @@ class MyApp
     #################
     # draw week
     #################
-    var wd = self.start_sunday ? weekday() : (weekday() + 6) % 7   # 0 = premier jour de semaine
+    var week_day = self.start_sunday ? weekday() : (weekday() + 6) % 7   # 0 = first day of the configured week
     xpos = 18
 
     if self.week_style == "large"
       line(xpos, 7, 31, 7, self.week_color)
-      line(xpos + wd * 2, 7, xpos + wd * 2 + 1, 7, self.day_color)
+      line(xpos + week_day * 2, 7, xpos + week_day * 2 + 1, 7, self.today_color)
 
     elif self.week_style == "progress"
       line(xpos, 7, 31, 7, self.week_color)
-      line(xpos, 7, xpos + wd * 2 + 1, 7, self.day_color)
+      line(xpos, 7, xpos + week_day * 2 + 1, 7, self.today_color)
 
     elif self.week_style == "dotted"
       line(xpos, 7, 31, 7, 0x000000)
       var i = 0
       while i < 7
-        pixel(xpos + i * 2, 7, i == wd ? self.day_color : self.week_color)
+        pixel(xpos + i * 2, 7, i == week_day ? self.today_color : self.week_color)
         i += 1
       end
 
     elif self.week_style == "dotted2"
       line(xpos, 7, 31, 7, 0x000000)
       var i = 0
-      var x = xpos
+      var cur_x = xpos
       while i < 7
-        if i == wd
-          line(x, 7, x + 1, 7, self.day_color)
-          x += 3
+        if i == week_day
+          line(cur_x, 7, cur_x + 1, 7, self.today_color)
+          cur_x += 3
         else
-          pixel(x, 7, self.week_color)
-          x += 2
+          pixel(cur_x, 7, self.week_color)
+          cur_x += 2
         end
         i += 1
       end
