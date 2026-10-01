@@ -1,8 +1,9 @@
 # @name Anothertime
 # @desc Always see time and other widgets
 # @author toinux@gmail.com
-# @version 1.3
+# @version 1.4
 # @config sc color "Seconds color" default=#FF00FF
+# @config sa select "Seconds animation" options=none,rewind,fade default=rewind
 # @config ta select "Time animation" options=scroll,fade default=fade
 # @config tad slider "Time animation duration" min=100 max=2000 default=500 unit=ms
 # @config dsty select "Date style" default=icon options=icon,calendar
@@ -44,7 +45,7 @@ class MyApp
   var date_color, temp_color, hum_color, bat_color  # value colors from settings
   var cal_header_color, cal_body_color, cal_text_color  # calendar block colors
 
-  var sec_rewind_dur, sec_rewind_start  # end-of-minute rewind effect on the seconds bar
+  var sec_anim, sec_effect_dur, sec_effect_start  # end-of-minute effect on the seconds bar (sa)
 
   # Parse the wlist config string ("date,temperature@5,...") into a widget list.
   # Falls back to a single date widget when the setting is empty or invalid.
@@ -89,11 +90,12 @@ class MyApp
     self.widget_anim_dur = store.get("wad")
 
     self.sec_color = store.get("sc")
+    self.sec_anim = store.get("sa")
     self.time_anim = store.get("ta")
     self.time_anim_dur = store.get("tad")
 
-    self.sec_rewind_dur = 500  # length of the end-of-minute rewind effect (ms)
-    self.sec_rewind_start = nil   # epoch when the rewind was armed, nil while idle
+    self.sec_effect_dur = 500  # length of the end-of-minute effect on the seconds bar (ms)
+    self.sec_effect_start = nil   # epoch when the effect was armed, nil while idle
 
     self.week_style = store.get("wsty")
     # week_color / today_color are config colors in the app store, not settings colors,
@@ -357,27 +359,34 @@ class MyApp
     #################
     var bar_len = 17
 
-    # arm the rewind effect during the last sec_rewind_dur ms of the minute
-    if ms_in_min >= 60000 - self.sec_rewind_dur && self.sec_rewind_start == nil
-      self.sec_rewind_start = now_epoch_ms
+    # arm the end-of-minute effect during the last sec_effect_dur ms of the minute
+    if self.sec_anim != "none" && ms_in_min >= 60000 - self.sec_effect_dur && self.sec_effect_start == nil
+      self.sec_effect_start = now_epoch_ms
     end
 
     # reset the flag right after the new minute starts
     if ms_in_min < 100
-      self.sec_rewind_start = nil
+      self.sec_effect_start = nil
     end
 
     var filled_px = 0
     var pct = 0.0
+    var bar_fade = 1.0
 
-    if self.sec_rewind_start != nil
-      # rewind: drain the bar from full to empty over the effect duration
-      var elapsed = now_epoch_ms - self.sec_rewind_start
-      var rewind_pct = clamp(elapsed * 1.0 / self.sec_rewind_dur, 0.0, 1.0)
+    if self.sec_effect_start != nil
+      var elapsed = now_epoch_ms - self.sec_effect_start
+      var effect_pct = clamp(elapsed * 1.0 / self.sec_effect_dur, 0.0, 1.0)
 
-      var remaining_px = bar_len * (1.0 - rewind_pct)
-      filled_px = int(remaining_px)
-      pct = remaining_px - filled_px
+      if self.sec_anim == "fade"
+        # fade: the full bar dims to black over the effect duration
+        filled_px = bar_len
+        bar_fade = 1.0 - effect_pct
+      else
+        # rewind: drain the bar from full to empty over the effect duration
+        var remaining_px = bar_len * (1.0 - effect_pct)
+        filled_px = int(remaining_px)
+        pct = remaining_px - filled_px
+      end
 
     else
       # normal: bar fills along with the seconds of the minute
@@ -386,11 +395,12 @@ class MyApp
       pct = bar_progress - filled_px
     end
 
+    var bar_color = self.fade_color(self.sec_color, bar_fade)
     for i:0..filled_px - 1
-      pixel(i, 7, self.sec_color)
+      pixel(i, 7, bar_color)
     end
     if filled_px < bar_len
-      pixel(filled_px, 7, self.fade_color(self.sec_color, pct))
+      pixel(filled_px, 7, self.fade_color(self.sec_color, pct * bar_fade))
     end
 
     #################

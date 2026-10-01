@@ -10,7 +10,7 @@ These scripts run directly on the device, join the app rotation, and keep workin
 
 | Script | Description | Version |
 |--------|-------------|---------|
-| **[Anothertime](#anothertime)** | Always-on time display with rotating widgets (date, temperature, humidity, battery) and a week indicator | 1.3 |
+| **[Anothertime](#anothertime)** | Always-on time display with rotating widgets (date, temperature, humidity, battery) and a week indicator | 1.4 |
 
 More scripts will be added over time.
 
@@ -23,7 +23,7 @@ A refined clock face that keeps the time visible at all times while cycling thro
 ### Features
 
 - **Large time display** with smooth digit transitions (scroll or fade)
-- **Seconds progress bar** along the bottom of the time, rewinding over the last 500 ms of each minute
+- **Seconds progress bar** along the bottom of the time: it fills up over the minute, then plays an end-of-minute animation during the last 500 ms — `rewind` (the bar drains back to empty), `fade` (the full bar dims out) or `none` (no animation, it just restarts)
 - **Rotating widgets**: date, temperature, humidity, battery (with custom icons)
 - **Date styles**: classic icon or calendar block
 - **Week indicator** with multiple visual styles (`large`, `progress`, `dotted`, `dotted2`)
@@ -38,6 +38,7 @@ A refined clock face that keeps the time visible at all times while cycling thro
 | Setting | Type | Description | Default |
 |---------|------|-------------|---------|
 | `sc` | color | Seconds bar color | `#FF00FF` |
+| `sa` | select | Seconds animation (`none` / `rewind` / `fade`) | `rewind` |
 | `ta` | select | Time animation (`scroll` / `fade`) | `fade` |
 | `tad` | slider | Time animation duration (ms) | `500` |
 | `dsty` | select | Date style (`icon` / `calendar`) | `icon` |
@@ -53,6 +54,8 @@ A refined clock face that keeps the time visible at all times while cycling thro
 | `wlist` | text | Widgets list (e.g. `date,temperature@5,humidity,battery`) | `date,temperature,humidity,battery` |
 
 Default widget duration is **3 seconds**. You can override the duration of individual widgets in `wlist` with the `@N` suffix (e.g. `temperature@5`).
+
+The seconds animation (`sa`) always runs over the **last 500 ms** of every minute; `rewind` and `fade` differ only in how the bar clears itself before the new minute starts.
 
 ### Installation
 
@@ -70,7 +73,7 @@ curl -H "Content-Type: text/plain" \
      http://<awtrix-ip>/api/v1/apps/script/Anothertime
 ```
 
-The source is ~16.0 KB. AWTRIX NG v1.1.1+ has no fixed script size limit (the old `scriptMaxBytes` is gone): an install needs enough free memory to hold the source plus compile headroom. A `507` reply means memory is short - delete an unused app or reboot to defragment.
+The source is ~16.5 KB. AWTRIX NG v1.1.1+ has no fixed script size limit (the old `scriptMaxBytes` is gone): an install needs enough free memory to hold the source plus compile headroom. A `507` reply means memory is short - delete an unused app or reboot to defragment.
 
 ---
 
