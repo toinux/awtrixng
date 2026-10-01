@@ -10,7 +10,7 @@ These scripts run directly on the device, join the app rotation, and keep workin
 
 | Script | Description | Version |
 |--------|-------------|---------|
-| **[Anothertime](#anothertime)** | Always-on time display with rotating widgets (date, temperature, humidity, battery) and a week indicator | 1.1 |
+| **[Anothertime](#anothertime)** | Always-on time display with rotating widgets (date, temperature, humidity, battery) and a week indicator | 1.3 |
 
 More scripts will be added over time.
 
@@ -23,7 +23,7 @@ A refined clock face that keeps the time visible at all times while cycling thro
 ### Features
 
 - **Large time display** with smooth digit transitions (scroll or fade)
-- **Seconds progress bar** along the bottom of the time
+- **Seconds progress bar** along the bottom of the time, rewinding over the last 500 ms of each minute
 - **Rotating widgets**: date, temperature, humidity, battery (with custom icons)
 - **Date styles**: classic icon or calendar block
 - **Week indicator** with multiple visual styles (`large`, `progress`, `dotted`, `dotted2`)
@@ -66,3 +66,20 @@ curl -H "Content-Type: text/plain" \
      -X PUT \
      --data-binary @anothertime.ax \
      http://<awtrix-ip>/api/v1/apps/script/Anothertime
+```
+
+The source is ~15.8 KB; the default `scriptMaxBytes` (16 KB) is just enough. A `413` reply means the device's limit was lowered below that.
+
+---
+
+## Development
+
+```bash
+# minify for deployment (Node 22.6+, no dependencies): stdout = script, stderr = stats
+./minify-berry/minify-berry.ts --classes --variables anothertime.ax > compact.ax
+
+# minify + upload to the device (edit the IP in the script first)
+./deploy.sh
+```
+
+A script that fails to compile still installs — read the `"error"` field of the reply (`null` is success). `compact.ax` is generated; don't commit it.
