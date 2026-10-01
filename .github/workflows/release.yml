@@ -1,0 +1,29 @@
+name: Release minified script
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  minify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "26"
+
+      - name: Minify anothertime.ax
+        env:
+          ASSET: anothertime-${{ github.event.release.tag_name }}.ax
+        run: ./minify-berry/minify-berry.ts --classes --variables anothertime.ax > "$ASSET"
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET: anothertime-${{ github.event.release.tag_name }}.ax
+        run: gh release upload "${{ github.event.release.tag_name }}" "$ASSET" --clobber
