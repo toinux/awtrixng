@@ -70,7 +70,7 @@ curl -H "Content-Type: text/plain" \
      http://<awtrix-ip>/api/v1/apps/script/Anothertime
 ```
 
-The source is ~15.8 KB; the default `scriptMaxBytes` (16 KB) is just enough. A `413` reply means the device's limit was lowered below that.
+The source is ~16.0 KB. AWTRIX NG v1.1.1+ has no fixed script size limit (the old `scriptMaxBytes` is gone): an install needs enough free memory to hold the source plus compile headroom. A `507` reply means memory is short - delete an unused app or reboot to defragment.
 
 ---
 
