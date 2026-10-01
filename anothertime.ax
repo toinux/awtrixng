@@ -12,6 +12,8 @@
 # @config ssun bool "Week starts Sunday" default=false
 # @config wa select "Widgets animation" options=scroll,fade default=fade
 # @config wad slider "Widgets animation duration" min=100 max=2000 default=500 unit=ms
+# @config ttopic text "Temperature topic" default=""
+# @config htopic text "Humidity topic" default=""
 # @config btopic text "Battery topic" default=""
 # @config wlist text "Widgets" default="date,temperature,humidity,battery" help="ex: date,temperature@5,humidity,date@4,battery" maxlen=200
 
@@ -34,7 +36,8 @@ class MyApp
   var time_color                # text color from settings
 
   var temp_str, hum_str, bat_str  # formatted sensor labels, rebuilt in loop()
-  var bat_from_mqtt             # true when the battery comes from the configured MQTT topic
+  var temp_raw, hum_raw        # raw MQTT readings (nil when none/unparsed)
+  var temp_from_mqtt, hum_from_mqtt, bat_from_mqtt  # MQTT-backed values
   var bat_level                 # battery value (0-100) or -1 when unavailable
   var day_of_month, day_str, date_style
 
@@ -103,24 +106,27 @@ class MyApp
 
     self.bat_str = "?"
     self.bat_level = -1
-    var bat_topic = store.get("btopic")
-    if bat_topic != nil && size(bat_topic) > 0
-      mqtt.subscribe(bat_topic, / topic, payload -> self.set_battery(payload))
-      self.bat_from_mqtt = true
-    else
-      self.bat_from_mqtt = false
-    end
+    self.bat_from_mqtt = self.subscribe_topic("btopic", / t, p -> self.set_battery(p))
+
+    self.temp_from_mqtt = self.subscribe_topic("ttopic", / t, p -> self.set_temperature(p))
+    self.hum_from_mqtt = self.subscribe_topic("htopic", / t, p -> self.set_humidity(p))
+  end
+
+  def subscribe_topic(key, cb)
+    var topic = store.get(key)
+    if topic == nil || size(topic) == 0 return false end
+    mqtt.subscribe(topic, cb)
+    return true
   end
 
   def update()
 
-    # sensors
-    var raw_temp = sensor.temperature()
+    # sensors, skipped when MQTT provides the value
+    var raw_temp = self.temp_from_mqtt ? self.temp_raw : sensor.temperature()
     self.temp_str = raw_temp == nil ? "?" : str(round(settings.get("useCelsius") ? raw_temp : (raw_temp * 1.8 + 32)))
-    var raw_hum = sensor.humidity()
+    var raw_hum = self.hum_from_mqtt ? self.hum_raw : sensor.humidity()
     self.hum_str = raw_hum == nil ? "?" : str(round(raw_hum))
 
-    # only read the battery from the sensor when no MQTT topic provides it
     if !self.bat_from_mqtt
       self.set_battery(sensor.battery())
     end
@@ -147,6 +153,15 @@ class MyApp
   def set_battery(value)
     self.bat_level = value == nil ? -1 : num(value)
     self.bat_str = self.bat_level < 0 ? "?" : str(self.bat_level)
+  end
+
+  # raw value from MQTT, formatted by update() exactly like the sensor reading
+  def set_temperature(value)
+    self.temp_raw = value == nil ? nil : num(value)
+  end
+
+  def set_humidity(value)
+    self.hum_raw = value == nil ? nil : num(value)
   end
 
   def loop()

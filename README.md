@@ -30,7 +30,7 @@ A refined clock face that keeps the time visible at all times while cycling thro
 - Uses **system colors** (time, date, temperature, humidity, battery, calendar header/body/text) so the face follows your AWTRIX theme
 - Temperature respects the device **Celsius / Fahrenheit** setting
 - Configurable animation styles and durations
-- Optional MQTT topic for an external battery level
+- Optional MQTT topics for temperature, humidity and battery; MQTT temperature/humidity are rounded (and converted to Fahrenheit when applicable) exactly like the onboard sensor values
 - Values longer than 2 digits scroll with a bounce animation
 
 ### Configuration options
@@ -47,6 +47,8 @@ A refined clock face that keeps the time visible at all times while cycling thro
 | `ssun` | bool | Week starts on Sunday | `false` |
 | `wa` | select | Widgets animation (`scroll` / `fade`) | `fade` |
 | `wad` | slider | Widgets animation duration (ms) | `500` |
+| `ttopic` | text | MQTT topic for temperature (leave empty to use the onboard sensor) | `""` |
+| `htopic` | text | MQTT topic for humidity (leave empty to use the onboard sensor) | `""` |
 | `btopic` | text | MQTT topic for battery level (leave empty to use the onboard sensor) | `""` |
 | `wlist` | text | Widgets list (e.g. `date,temperature@5,humidity,battery`) | `date,temperature,humidity,battery` |
 
