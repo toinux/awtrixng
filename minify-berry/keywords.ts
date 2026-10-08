@@ -163,7 +163,7 @@ export const FROZEN_METHODS = new Set([
 ]);
 
 export const HEADER_RE =
-  /^#\s*@(name|desc|author|version|headless|module|config)\b/i;
+  /^#\s*@(name|desc|author|version|headless|module|config|icons)\b/i;
 
 export const MODULE_HEADER_RE = /^#\s*@module\b/i;
 
