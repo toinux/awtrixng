@@ -88,23 +88,25 @@ AWTRIX NG v1.1.1+ has no fixed script size limit: an install needs enough contig
 
 Set **Car** (`id`) to the TeslaMate car ID and **Namespace** (`ns`) if used. Colors, flow speed, trail length and view duration are configurable through the app settings. A missing, invalid or negative power value leaves the percentage displayed; power is never displayed outside active charging.
 
-Install with `./deploy.sh tesla`, or paste the complete source into a script named `Tesla` in the web UI. Deployment requires `AWTRIX_IP` and optional `AWTRIX_AUTH` in `.env`.
+Install with `./deploy.sh tesla`, or paste the complete source into a script named `Tesla` in the web UI. Deployment requires `AWTRIX_IP` and optional `AWTRIX_AUTH` in `.env`. The script creates only by default; use `./deploy.sh tesla --force` to replace an installed app without remote-change protection.
 
 ---
 
 ## Development
 
-Each application is an `awtrix-cli` project under `apps/`, with its own `awtrix.toml` and `src/` directory. Validate a project locally with `awtrix-cli project validate --manifest apps/anothertime/awtrix.toml` or `apps/tesla/awtrix.toml`. Minification uses the installed `awtrix-cli`; its release workflow pin is updated periodically. Deployment also requires `curl` and `jq`; Python display/MQTT tools use Python 3's standard library.
+Each application is an `awtrix-cli` project under `apps/`, with its own `awtrix.toml` and `src/` directory. Validate a project locally with `awtrix-cli project validate --manifest apps/anothertime/awtrix.toml` or `apps/tesla/awtrix.toml`. Minification and deployment use the installed `awtrix-cli`; its release workflow pin is updated periodically. Python display/MQTT tools use Python 3's standard library.
 
-For deployment, copy `.env.example` to `.env`, set `AWTRIX_IP`, and set optional `AWTRIX_AUTH=user:pass` when device authentication is enabled. `deploy.sh` loads this file; Python tools also accept environment overrides. Local `.env` and generated `*.min.ax` files are ignored by Git.
+For deployment, copy `.env.example` to `.env`, set `AWTRIX_IP`, and set optional `AWTRIX_AUTH=user:pass` when device authentication is enabled. `deploy.sh` loads this file; Python tools also accept environment overrides. Deployment creates an app only if it is absent; `--force` explicitly enables unconditional replacement. Local `.env` and generated `*.min.ax` files are ignored by Git.
 
 ```bash
 # minify: creates apps/anothertime/src/anothertime.min.ax beside the source
 awtrix-cli minify apps/anothertime/src/anothertime.ax
 
-# minify + upload to the configured device
+# create an app on the configured device (create-only)
 ./deploy.sh anothertime
-./deploy.sh tesla
+
+# replace an already-installed app (unconditional)
+./deploy.sh tesla --force
 ```
 
 Successful minification does not verify Berry syntax. A script that fails to compile still installs — require `"error": null` in the upload reply, then capture the running app to check its display. The minifier's field-renaming constraints are documented in [`AGENTS.md`](AGENTS.md#minifier-traps).
