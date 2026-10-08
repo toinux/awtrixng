@@ -109,7 +109,7 @@ awtrix-cli minify apps/anothertime/src/anothertime.ax
 ./deploy.sh tesla --force
 ```
 
-Successful minification does not verify Berry syntax. A script that fails to compile still installs — require `"error": null` in the upload reply, then capture the running app to check its display. The minifier's field-renaming constraints are documented in [`AGENTS.md`](AGENTS.md#minifier-traps).
+Successful minification does not verify Berry syntax. A script that fails to compile still installs — require `"error": null` in the upload reply, then capture the running app to check its display. The minifier's field-renaming constraints are documented in [`AGENTS.md`](AGENTS.md#minifier-constraints).
 
 ### Agent setup
 
