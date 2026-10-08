@@ -1,6 +1,6 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+This table maps the engineering skills' triage roles to the intended GitHub label names. It defines vocabulary, not which labels currently exist.
 
 | Label in mattpocock/skills | Label in our tracker | Meaning                                  |
 | -------------------------- | -------------------- | ---------------------------------------- |
@@ -10,6 +10,6 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+Before assigning a role, run `gh label list --limit 100` in the repo. If its mapped label is absent, create it with `gh label create <name> --description "<meaning from the table>"`, then apply it to the issue. Completion requires the mapped label to appear on the issue.
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+Keep this mapping authoritative when changing the triage vocabulary.

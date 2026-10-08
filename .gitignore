@@ -1,0 +1,13 @@
+# Minified build artifacts
+*.min.ax
+
+# Local environment
+.env
+
+# Agent skills (installed globally or per-project)
+.agents/skills/
+.claude/skills/
+skills-lock.json
+
+# Python bytecode
+__pycache__/

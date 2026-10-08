@@ -1,0 +1,112 @@
+name: Validate release artifacts
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/**'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/release-validation.yml'
+
+permissions: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      AWTRIX_CLI_VERSION: v0.3.1
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned awtrix-cli
+        run: |
+          set -euo pipefail
+          ASSET=awtrix-cli-x86_64-unknown-linux-gnu
+          RELEASE_URL="https://github.com/toinux/awtrix-cli/releases/download/${AWTRIX_CLI_VERSION}"
+          CLI_PATH="$RUNNER_TEMP/$ASSET"
+
+          curl --fail --location --silent --show-error \
+            "$RELEASE_URL/$ASSET" --output "$CLI_PATH"
+          curl --fail --location --silent --show-error \
+            "$RELEASE_URL/SHA256SUMS" --output "$RUNNER_TEMP/SHA256SUMS"
+
+          EXPECTED_SHA=$(awk -v asset="$ASSET" '$2 == asset { print $1 }' "$RUNNER_TEMP/SHA256SUMS")
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Missing or invalid checksum for $ASSET" >&2
+            exit 1
+          fi
+          printf '%s  %s\n' "$EXPECTED_SHA" "$CLI_PATH" | sha256sum --check --status
+          chmod +x "$CLI_PATH"
+
+          CLI_VERSION_TEXT=$("$CLI_PATH" --version)
+          if [[ "$CLI_VERSION_TEXT" != *" ${AWTRIX_CLI_VERSION#v}" ]]; then
+            echo "Unexpected awtrix-cli version: $CLI_VERSION_TEXT" >&2
+            exit 1
+          fi
+          echo "AWTRIX_CLI=$CLI_PATH" >> "$GITHUB_ENV"
+
+      - name: Validate projects, release tags and minified assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          found=false
+
+          for MANIFEST in apps/*/awtrix.toml; do
+            [[ -f "$MANIFEST" ]] || continue
+            APP="${MANIFEST#apps/}"
+            APP="${APP%/awtrix.toml}"
+            SOURCE="apps/$APP/src/$APP.ax"
+
+            if [[ ! -f "$SOURCE" ]]; then
+              echo "Missing script source: $SOURCE" >&2
+              exit 1
+            fi
+
+            "$AWTRIX_CLI" --json project validate --manifest "$MANIFEST"
+            VERSION=$(awk '$1 == "#" && $2 == "@version" { print $3; exit }' "$SOURCE")
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid # @version in $SOURCE: $VERSION" >&2
+              exit 1
+            fi
+
+            for SUFFIX in "" "-rc.1"; do
+              TAG="$APP-v$VERSION$SUFFIX"
+              if [[ ! "$TAG" =~ ^([a-z][a-z0-9_-]*)-v([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?)$ ]]; then
+                echo "Malformed release tag: $TAG" >&2
+                exit 1
+              fi
+              TAG_APP="${BASH_REMATCH[1]}"
+              TAG_VERSION="${BASH_REMATCH[2]}"
+              if [[ "$TAG_APP" != "$APP" || "${TAG_VERSION%%-*}" != "$VERSION" ]]; then
+                echo "Release tag $TAG does not match $SOURCE @version $VERSION" >&2
+                exit 1
+              fi
+            done
+
+            "$AWTRIX_CLI" minify "$SOURCE"
+            MINIFIED="${SOURCE%.ax}.min.ax"
+            mv "$MINIFIED" "release-artifacts/$APP-$VERSION.ax"
+            found=true
+          done
+
+          if [[ "$found" != true ]]; then
+            echo "No AWTRIX projects found under apps/" >&2
+            exit 1
+          fi
+
+      - name: Upload minified release candidates
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-candidates-${{ github.run_id }}
+          path: release-artifacts/*.ax
+          if-no-files-found: error
+          retention-days: 7

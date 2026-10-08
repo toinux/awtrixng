@@ -1,29 +1,140 @@
-name: Release minified script
+name: Release script
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '*-v*.*.*'
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  minify:
-    runs-on: ubuntu-latest
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      # Review and update this pin periodically as awtrix-cli evolves.
+      AWTRIX_CLI_VERSION: v0.3.1
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: Checkout with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "26"
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Minify anothertime.ax
-        env:
-          ASSET: anothertime-${{ github.event.release.tag_name }}.ax
-        run: ./minify-berry/minify-berry.ts --classes --variables anothertime.ax > "$ASSET"
+      - name: Install pinned awtrix-cli
+        run: |
+          set -euo pipefail
+          ASSET=awtrix-cli-x86_64-unknown-linux-gnu
+          RELEASE_URL="https://github.com/toinux/awtrix-cli/releases/download/${AWTRIX_CLI_VERSION}"
+          CLI_PATH="$RUNNER_TEMP/$ASSET"
 
-      - name: Attach to release
+          curl --fail --location --silent --show-error \
+            "$RELEASE_URL/$ASSET" --output "$CLI_PATH"
+          curl --fail --location --silent --show-error \
+            "$RELEASE_URL/SHA256SUMS" --output "$RUNNER_TEMP/SHA256SUMS"
+
+          EXPECTED_SHA=$(awk -v asset="$ASSET" '$2 == asset { print $1 }' "$RUNNER_TEMP/SHA256SUMS")
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Missing or invalid checksum for $ASSET" >&2
+            exit 1
+          fi
+          printf '%s  %s\n' "$EXPECTED_SHA" "$CLI_PATH" | sha256sum --check --status
+          chmod +x "$CLI_PATH"
+
+          CLI_VERSION_TEXT=$("$CLI_PATH" --version)
+          if [[ "$CLI_VERSION_TEXT" != *" ${AWTRIX_CLI_VERSION#v}" ]]; then
+            echo "Unexpected awtrix-cli version: $CLI_VERSION_TEXT" >&2
+            exit 1
+          fi
+          echo "AWTRIX_CLI=$CLI_PATH" >> "$GITHUB_ENV"
+
+      - name: Parse tag and validate script version
+        id: parse
         env:
-          GH_TOKEN: ${{ github.token }}
-          ASSET: anothertime-${{ github.event.release.tag_name }}.ax
-        run: gh release upload "${{ github.event.release.tag_name }}" "$ASSET" --clobber
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^([a-z][a-z0-9_-]*)-v([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?)$ ]]; then
+            echo "Malformed tag: $TAG (expected <script>-vMAJOR.MINOR.PATCH[-suffix])" >&2
+            exit 1
+          fi
+          SCRIPT="${BASH_REMATCH[1]}"
+          VERSION="${BASH_REMATCH[2]}"
+          BASE_VERSION="${VERSION%%-*}"
+          SOURCE="apps/$SCRIPT/src/$SCRIPT.ax"
+
+          if [[ ! -f "$SOURCE" ]]; then
+            echo "Script source not found: $SOURCE" >&2
+            exit 1
+          fi
+
+          SOURCE_VERSION=$(awk '$1 == "#" && $2 == "@version" { print $3; exit }' "$SOURCE")
+          if [[ "$SOURCE_VERSION" != "$BASE_VERSION" ]]; then
+            echo "Tag version $BASE_VERSION does not match $SOURCE @version $SOURCE_VERSION" >&2
+            exit 1
+          fi
+
+          PRERELEASE=false
+          [[ "$VERSION" == *-* ]] && PRERELEASE=true
+
+          {
+            echo "script=$SCRIPT"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "source=$SOURCE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Minify script with awtrix-cli
+        id: minify
+        env:
+          SCRIPT: ${{ steps.parse.outputs.script }}
+          VERSION: ${{ steps.parse.outputs.version }}
+          SOURCE: ${{ steps.parse.outputs.source }}
+        run: |
+          set -euo pipefail
+          "$AWTRIX_CLI" minify "$SOURCE"
+          MINIFIED="${SOURCE%.ax}.min.ax"
+          ASSET="${SCRIPT}-${VERSION}.ax"
+          mv "$MINIFIED" "$ASSET"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Find previous tag for this script
+        id: previous
+        env:
+          SCRIPT: ${{ steps.parse.outputs.script }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PREVIOUS_TAG=$(git tag --list "${SCRIPT}-v*.*.*" --sort=-v:refname | awk -v current="$TAG" '$0 != current { print; exit }')
+          echo "tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        env:
+          SCRIPT: ${{ steps.parse.outputs.script }}
+          SOURCE: ${{ steps.parse.outputs.source }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            NOTES=$(git log "$PREVIOUS_TAG..$TAG" --format='- %s' -- "$SOURCE" | awk 'NR <= 20')
+          else
+            NOTES=$(git log "$TAG" --format='- %s' -- "$SOURCE" | awk 'NR <= 20')
+          fi
+          if [[ -z "$NOTES" ]]; then
+            NOTES="- No source changes found for $SCRIPT"
+          fi
+          printf '%s\n' "$NOTES" > release-notes.md
+          echo "path=release-notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.parse.outputs.script }} ${{ steps.parse.outputs.version }}
+          body_path: ${{ steps.notes.outputs.path }}
+          prerelease: ${{ steps.parse.outputs.prerelease }}
+          files: ${{ steps.minify.outputs.asset }}
+          generate_release_notes: false

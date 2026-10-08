@@ -1,0 +1,12 @@
+[project]
+name = "anothertime"
+# Required manifest metadata; script releases use the source @version.
+version = "0.1.0"
+
+[target]
+# profile = "desk"
+
+[[scripts]]
+name = "Anothertime"
+file = "src/anothertime.ax"
+create = true
