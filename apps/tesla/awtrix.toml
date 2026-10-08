@@ -1,0 +1,12 @@
+[project]
+name = "tesla"
+# Required manifest metadata; script releases use the source @version.
+version = "0.1.0"
+
+[target]
+# profile = "desk"
+
+[[scripts]]
+name = "Tesla"
+file = "src/tesla.ax"
+create = true

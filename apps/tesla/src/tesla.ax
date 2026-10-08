@@ -1,0 +1,458 @@
+# @name Tesla
+# @desc TeslaMate battery and charging
+# @author toinux
+# @version 1.6.0
+#
+# @config id number "Car" default=1 min=1 max=20
+# @config ns text "Namespace" default=""
+# @config bc color "Battery" default=#50E56C
+# @config cc color "Charging" default=#20D9FF
+# @config lc color "Limit" default=#765EE8
+# @config bg color "Bar bg" default=#343940
+# @config fc color "Bolt" default=#FFD43B
+# @config ec color "Flux électrique" default=#FFD43B
+# @config flow number "Demi-pas du flux" default=120 min=40 max=500 unit=ms
+# @config trail number "Persistance du flux" default=3 min=1 max=6 unit=pas
+# @config page number "Durée par vue" default=3 min=1 max=10 unit=s
+
+import math
+
+class Tesla
+
+  # Raw values received from TeslaMate.
+  var soc, lim, charging, plugged, power
+
+  # Pre-formatted strings displayed on the matrix.
+  var sb, sp
+
+  # Cached configured colors.
+  var bc, cc, lc, bg, fc
+  var ec, flow, trail
+  var page, shown_at
+
+  # MQTT topic prefix.
+  var base
+
+
+  def init()
+
+    # ------------------------------------------------------------------------
+    # INITIAL STATE
+    # ------------------------------------------------------------------------
+
+    self.soc = nil
+    self.lim = nil
+    self.charging = false
+    self.plugged = false
+    self.power = nil
+    self.sp = "--"
+    self.shown_at = 0
+    self.page = store.get("page") * 1000
+
+    # Until MQTT has delivered a value, display a known placeholder.
+    #
+    # "--" has a predictable width:
+    #
+    #   2 px "-" + 1 px gap + 2 px "-" = 5 px
+    self.sb = "--"
+
+
+    # ------------------------------------------------------------------------
+    # COLORS
+    # ------------------------------------------------------------------------
+
+    self.bc = store.get("bc")
+    self.cc = store.get("cc")
+    self.lc = store.get("lc")
+    self.bg = store.get("bg")
+    self.fc = store.get("fc")
+    self.ec = store.get("ec")
+    self.flow = store.get("flow")
+    self.trail = store.get("trail")
+
+
+    # ------------------------------------------------------------------------
+    # TESLAMATE MQTT PREFIX
+    # ------------------------------------------------------------------------
+    #
+    # ns empty:
+    #
+    #   teslamate/cars/2/
+    #
+    # ns = "home":
+    #
+    #   teslamate/home/cars/2/
+
+    var ns = store.get("ns")
+
+    self.base = "teslamate/"
+
+    if ns != nil && size(ns) > 0
+      self.base += ns + "/"
+    end
+
+    self.base += "cars/" + str(store.get("id")) + "/"
+
+
+    # ------------------------------------------------------------------------
+    # MQTT SUBSCRIPTIONS
+    # ------------------------------------------------------------------------
+    #
+    # This intentionally follows the same pattern as anothertime.ax:
+    #
+    #   mqtt.subscribe(topic, callback)
+    #
+    # and lets the callback itself parse the MQTT payload.
+    #
+    # TeslaMate values are retained MQTT values, so they should be delivered
+    # shortly after these subscriptions are registered.
+
+    var battery_topic = "teslamate/"
+
+    if ns != nil && size(ns) > 0
+      battery_topic += ns + "/"
+    end
+
+    # Use a one-level wildcard for this topic: the broker/device's exact
+    # subscription did not deliver the retained battery value reliably.
+    battery_topic += "cars/+/battery_level"
+
+    mqtt.subscribe(
+      battery_topic,
+      / t, p -> self.set_battery_for_topic(t, p)
+    )
+
+    mqtt.subscribe(
+      self.base + "charge_limit_soc",
+      / t, p -> self.set_limit(p)
+    )
+
+    mqtt.subscribe(
+      self.base + "charging_state",
+      / t, p -> self.set_charging(p)
+    )
+
+    mqtt.subscribe(
+      self.base + "charger_power",
+      / t, p -> self.set_power(p)
+    )
+
+  end
+
+
+  # ==========================================================================
+  # MQTT CALLBACKS
+  # ==========================================================================
+
+
+  def set_battery(value)
+
+    # IMPORTANT:
+    #
+    # This deliberately mirrors the working MQTT battery code from
+    # anothertime.ax.
+    #
+    # TeslaMate:
+    #
+    #   teslamate/cars/2/battery_level = "80"
+    #
+    # becomes:
+    #
+    #   num("80") = 80
+
+    self.soc = value == nil ? nil : num(value)
+
+    if self.soc == nil
+      self.sb = "--"
+      return
+    end
+
+    self.soc = clamp(round(self.soc), 0, 100)
+
+    # L'espace libéré par les températures permet d'afficher jusqu'à 100 %.
+    self.sb = str(self.soc) + "%"
+
+  end
+
+
+  def set_battery_for_topic(topic, value)
+
+    if topic == self.base + "battery_level"
+      self.set_battery(value)
+    end
+
+  end
+
+
+  def set_limit(value)
+
+    self.lim = value == nil ? nil : num(value)
+
+    if self.lim != nil
+      self.lim = clamp(round(self.lim), 0, 100)
+    end
+
+  end
+
+
+  def set_charging(value)
+
+    # TeslaMate currently reports values such as:
+    #
+    #   Charging
+    #   Complete
+    #   Stopped
+    #   Disconnected
+    #
+    # Only active charging gets the charging color and lightning bolt.
+
+    self.charging = value == "Charging"
+    self.plugged = value == "Charging" || value == "Complete" ||
+                   value == "Stopped" || value == "Starting" || value == "NoPower"
+
+  end
+
+
+  # Puissance utile seulement en charge ; aucun affichage d'une ancienne valeur à l'arrêt.
+  def set_power(value)
+    self.power = value == nil ? nil : num(value)
+    if self.power == nil || self.power < 0
+      self.power = nil
+      self.sp = "--"
+      return
+    end
+    self.sp = str(self.power < 10 ? round(self.power, 1) : round(self.power)) + "kW"
+  end
+
+  def on_show()
+    self.shown_at = now_ms()
+  end
+
+  def duration()
+    return self.charging && self.power != nil ? self.page * 2 : 0
+  end
+
+
+  # Fondu des canaux RGB, comme fade_color() dans anothertime, mais vers le jaune.
+  def blend_color(base, tint, pct)
+    var r = (base >> 16) & 0xFF
+    var g = (base >> 8) & 0xFF
+    var b = base & 0xFF
+    return rgb(int(r + (((tint >> 16) & 0xFF) - r) * pct),
+               int(g + (((tint >> 8) & 0xFF) - g) * pct),
+               int(b + ((tint & 0xFF) - b) * pct))
+  end
+
+  # Pixels de plug.gif ; rouge -> vert par permutation des canaux, gris inchangé.
+  def draw_plug(x)
+
+    var bright = self.plugged ? 0x00FF00 : 0xFF0000
+    var mid = self.plugged ? 0x00C100 : 0xC10000
+    var dark = self.plugged ? 0x058005 : 0x800505
+
+    line(x + 1, 0, x + 1, 5, bright)
+    rect_fill(x + 2, 1, 2, 4, mid)
+    line(x + 4, 2, x + 4, 3, dark)
+    pixel(x, 1, 0xCECECE)
+    pixel(x, 4, 0xCECECE)
+    line(x + 5, 2, x + 5, 3, 0xCECECE)
+    pixel(x + 6, 4, 0xCECECE)
+    pixel(x + 7, 5, 0xCECECE)
+
+    # Front doux et traînée persistante : chaque pixel retrouve lentement sa nuance.
+    # Deux demi-pas par pixel ralentissent le courant sans compteur de frames.
+    if self.charging
+      var cycle = 8 + self.trail + 2
+      var step_ms = self.flow * 2
+      var phase = (now_ms() % (step_ms * cycle)) * 1.0 / step_ms
+      for step:0..7
+        var distance = phase - step
+        if distance < -1 distance += cycle end
+        if distance > cycle - 1 distance -= cycle end
+        if distance > -1 && distance < self.trail
+          var fade = distance < 0 ? distance : distance * 1.0 / self.trail
+          var pct = (math.cos(math.pi * fade) + 1) * 0.5
+          var base = 0xCECECE
+          if step == 1 base = bright
+          elif step == 2 || step == 3 base = mid
+          elif step == 4 base = dark end
+          var color = self.blend_color(base, self.ec, pct)
+          # La vague couvre tous les pixels du GIF dans chaque colonne.
+          if step == 0
+            pixel(x + step, 1, color)
+            pixel(x + step, 4, color)
+          elif step == 1
+            line(x + step, 0, x + step, 5, color)
+          elif step <= 3
+            line(x + step, 1, x + step, 4, color)
+          elif step <= 5
+            line(x + step, 2, x + step, 3, color)
+          elif step == 6
+            pixel(x + 6, 4, color)
+          else
+            pixel(x + 7, 5, color)
+          end
+        end
+      end
+    end
+
+  end
+
+
+  # ==========================================================================
+  # DRAW
+  # ==========================================================================
+
+
+  def draw()
+
+    clear()
+
+
+    # Pourcentage à gauche ; prise verte si branchée, rouge sinon.
+    var battery_x = width() - 8
+    var bat_color = self.charging ? self.cc : self.bc
+    var label = self.sb
+    if self.charging && self.power != nil &&
+       ((now_ms() - self.shown_at) / self.page) % 2 == 1
+      label = self.sp
+    end
+    scroll_text(0, 6, battery_x - 1, label, bat_color)
+    self.draw_plug(battery_x)
+
+
+    # =========================================================================
+    # BATTERY / CHARGE-LIMIT BAR
+    # =========================================================================
+    #
+    # The final row is painted in three passes:
+    #
+    #   1. background
+    #   2. configured charge limit
+    #   3. actual battery SOC
+    #
+    #
+    # The last layer wins.
+    #
+    # Therefore:
+    #
+    #   SOC = 72, limit = 80
+    #
+    # gives:
+    #
+    #   BBBBBBBBBBBBBBBBBBBBBBBLLL......
+    #
+    #
+    # SOC = 80, limit = 80:
+    #
+    #   BBBBBBBBBBBBBBBBBBBBBBBBBB......
+    #
+    #
+    # SOC = 92, limit = 80:
+    #
+    #   BBBBBBBBBBBBBBBBBBBBBBBBBBBBBB..
+    #
+    #
+    # The SOC naturally covers the limit whenever both occupy the same pixels.
+
+
+    var y = height() - 1
+
+
+    # -------------------------------------------------------------------------
+    # LAYER 1 - BACKGROUND
+    # -------------------------------------------------------------------------
+
+    line(
+      0,
+      y,
+      width() - 1,
+      y,
+      self.bg
+    )
+
+
+    # -------------------------------------------------------------------------
+    # LAYER 2 - CHARGE LIMIT
+    # -------------------------------------------------------------------------
+
+    if self.lim != nil
+
+      var n =
+        round(
+          self.lim *
+          width() /
+          100.0
+        )
+
+      n = clamp(
+        n,
+        0,
+        width()
+      )
+
+
+      if n > 0
+
+        line(
+          0,
+          y,
+          n - 1,
+          y,
+          self.lc
+        )
+
+      end
+
+    end
+
+
+    # -------------------------------------------------------------------------
+    # LAYER 3 - ACTUAL BATTERY
+    # -------------------------------------------------------------------------
+    #
+    # Painted last deliberately.
+    #
+    # With the values shown in your TeslaMate screenshot:
+    #
+    #   battery_level    = 80
+    #   charge_limit_soc = 80
+    #
+    # this layer covers the entire purple limit section with the battery color.
+
+    if self.soc != nil
+
+      var n =
+        round(
+          self.soc *
+          width() /
+          100.0
+        )
+
+      n = clamp(
+        n,
+        0,
+        width()
+      )
+
+
+      if n > 0
+
+        line(
+          0,
+          y,
+          n - 1,
+          y,
+          bat_color
+        )
+
+      end
+
+    end
+
+  end
+
+end
+
+
+return Tesla()

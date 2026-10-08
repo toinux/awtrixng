@@ -1,11 +1,11 @@
 # Anothertime
 
 ## Changes
-* 1.0 : first release
-* 1.1 : battery widget, customization of widget orders and duration, other fixes...
-* 1.2 : add calendar style for date, use more system colors
-* 1.3 : seconds rewind effect
-* 1.4 : configurable seconds bar animation (none / rewind / fade), MQTT topics for temperature and humidity
+* 1.0.0 : first release
+* 1.1.0 : battery widget, customization of widget orders and duration, other fixes...
+* 1.2.0 : add calendar style for date, use more system colors
+* 1.3.0 : seconds rewind effect
+* 1.4.0 : configurable seconds bar animation (none / rewind / fade), MQTT topics for temperature, humidity and battery
 
 ## Description
 **An always-on clock that packs time, seconds, weekday and a rotating widget onto a single 32×8 panel.**
@@ -14,12 +14,11 @@ Anothertime is a compact "everything at once" clock face: a big HH:MM readout wi
 transitions, a seconds-progress bar, a weekday indicator, and a small rotating widget (date /
 temperature / humidity / battery) in the corner — all on the same screen, all the time.
 
-> This app is still evolving — the only thing still hardcoded is the length of the end-of-minute
-> seconds animation (500 ms). Everything else below is a setting. It's fully usable as-is.
+The end-of-minute seconds animation lasts 500 ms. Widget dwell time defaults to 3 seconds and
+can be overridden per entry in the widget list.
 
-The script is minified to about 7.3 KB before deployment (the old 8192-byte script limit is gone
-as of AWTRIX NG v1.1.1, but a smaller script leaves more heap free for the rest of the firmware),
-the original source code is available at https://github.com/toinux/awtrixng
+Use minified source for deployment to reduce installation memory pressure. Source and
+installation instructions: https://github.com/toinux/awtrixng#anothertime
 
 ## Requirements
 
@@ -28,14 +27,15 @@ the original source code is available at https://github.com/toinux/awtrixng
   all read the device's wall clock; before it syncs they simply won't show meaningful values.
 - **Temperature / humidity sensor: optional.** If your board has none (or you'd rather not use it),
   those two widgets just show `?` instead of a reading — nothing breaks. Both can also come from an
-  **MQTT topic** instead of the onboard sensor.
+   **MQTT topic** instead of the onboard sensor. MQTT temperature readings are in Celsius;
+   configured topics replace the sensor without falling back to it when data is missing.
 - **No network requests, no API keys, no icons required.** Everything is drawn on-device (MQTT is
   optional and only used if you configure a topic).
 
 ## What you see on screen
 
-- **Time (top-left, large digits):** `HH:MM`. The colon between hours and minutes fades in and out
-  once a second. When the minute changes, the two affected digits animate from old to new — either
+- **Time (top-left):** `HH:MM`. The colon pulses during odd-numbered seconds and is off during
+  even-numbered seconds. When the minute changes, each changed digit animates from old to new — either
   a **fade** cross-dissolve or a **scroll** (digits slide past each other), your choice.
 - **Seconds bar (bottom-left, columns 0–16):** fills left to right over the course of each minute,
   with a softly-fading pixel at the leading edge instead of a hard cutoff. Over the last 500 ms of
@@ -63,23 +63,5 @@ the original source code is available at https://github.com/toinux/awtrixng
 
 Go to the **Apps** tab → the **⋯** menu on Anothertime's row → **Settings**. Saving restarts the app.
 
-| Setting | What it does | Default |
-|---------|--------------|---------|
-| **Seconds color** (`sc`) | Color of the seconds bar | `#FF00FF` |
-| **Seconds animation** (`sa`) | End-of-minute animation: `none`, `rewind` or `fade` | `rewind` |
-| **Time animation** (`ta`) | How the digits change at the minute turn: `scroll` or `fade` | `fade` |
-| **Time animation duration** (`tad`) | Length of the digit animation | `500 ms` |
-| **Date style** (`dsty`) | `icon` (calendar page) or `calendar` (block) | `icon` |
-| **Week style** (`wsty`) | `large`, `progress`, `dotted` or `dotted2` | `dotted2` |
-| **Week days color** (`wc`) | Color of the unhighlighted days in the week row | `#00FFFF` |
-| **Current day color** (`wdc`) | Color of today in the week row | `#FF00FF` |
-| **Week starts Sunday** (`ssun`) | Start the week on Sunday instead of Monday | `false` |
-| **Widgets animation** (`wa`) | How widgets swap: `scroll` or `fade` | `fade` |
-| **Widgets animation duration** (`wad`) | Length of the widget swap animation | `500 ms` |
-| **Temperature topic** (`ttopic`) | MQTT topic for temperature (empty = onboard sensor) | *(empty)* |
-| **Humidity topic** (`htopic`) | MQTT topic for humidity (empty = onboard sensor) | *(empty)* |
-| **Battery topic** (`btopic`) | MQTT topic for the battery level (empty = system value) | *(empty)* |
-| **Widgets** (`wlist`) | Widget list and per-widget dwell time, e.g. `date,temperature@5,humidity,battery` | `date,temperature,humidity,battery` |
-
-Widget dwell times are in seconds and default to **3 seconds**; the `@N` suffix overrides the
-duration for a single widget (1–60).
+The [configuration table in the README](../../README.md#configuration-options) is the maintained
+settings reference. The `@N` widget-list suffix sets a dwell time in seconds (1–60).
