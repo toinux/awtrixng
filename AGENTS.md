@@ -41,13 +41,16 @@
   - GitHub Actions downloads checksum-verified awtrix-cli v0.3.1, minifies only the tagged app, verifies the source version, generates release notes since its previous app tag, and publishes a `<app>-<version>.ax` asset.
   - Review the pinned awtrix-cli version periodically and update it deliberately. Release publishing requires job-level `contents: write`.
 
-- **Verify an install:** a script that fails to compile still returns `200` — the only success is `"error": null` in the response body. To check what it draws:
+- **Validate release automation without publishing:** push to a `feature/**` branch or open a pull request to `main`. `.github/workflows/release-validation.yml` validates every project and its stable/prerelease tag forms, minifies each script with the pinned CLI, and uploads downloadable `.ax` candidates for 7 days. It has read-only repository permission and does not create a GitHub Release; it cannot verify Berry compilation on the device.
+
+- **Verify an install:** a successful HTTP status alone does not establish Berry compilation. Select the app, then observe runtime state and capture the framebuffer with the CLI:
   ```sh
-  curl -sX PUT "http://$AWTRIX_IP/api/v1/apps/active" -H 'Content-Type: application/json' -d '{"name":"Anothertime","fast":true}'
-  curl -s "http://$AWTRIX_IP/api/v1/display/screen"
+  APP_NAME=Anothertime # use Tesla for the Tesla app
+  awtrix-cli --target "http://$AWTRIX_IP" --json apps select "$APP_NAME" --fast
+  awtrix-cli --target "http://$AWTRIX_IP" --json script verify "$APP_NAME" --duration-secs 10 --capture "/tmp/opencode/$APP_NAME.png"
   ```
-  - `401` means auth is on → `curl -u user:pass`.
-  - Read the installed app's config; saved choices override header defaults. Capture with `python3 tools/awtrix-screen.py --app Anothertime --wait 0.3 --out /tmp/opencode/anothertime.png` and confirm the intended app is active.
+  - For authenticated devices, configure the CLI profile or set `AWTRIX_USERNAME` and `AWTRIX_PASSWORD`.
+  - Check that `start_verified` is `true` and `runtime_error` is `null`. A saved app config overrides source-header defaults. Inspect the capture to confirm the intended display.
 
 ## Refactoring safely
 
@@ -64,7 +67,7 @@
 ## Script conventions (AWTRIX-specific)
 
 - Read `.agents/skills/awtrix-berry-app/SKILL.md` and its `references/awtrix-api.md` before writing or changing a `.ax` file. If the installed skill is missing, follow `README.md#agent-setup`. That skill is the source of truth for the API, install and verification flow.
-- Header tags (`# @name`, `# @version`, `# @config …`) must stay at the top of the file: the parser stops reading tags at the first line that is neither blank nor a comment, so they cannot sit below the `import`.
+- Header tags (`# @name`, `# @version`, `# @config …`, `# @icons …`) must stay at the top of the file: the parser stops reading tags at the first line that is neither blank nor a comment, so they cannot sit below the `import`.
 - Anything the user might change is a `# @config` field read with `store.get(key)` — never a hardcoded constant, and never repeat the default in code.
 - AWTRIX NG v1.1.1+ has no fixed script-size cap; older limits in the installed skill do not apply to those versions. The shared Berry heap is 96 KB without PSRAM. Installation requires contiguous source memory plus compile headroom (roughly 8 KB); `507` indicates insufficient or fragmented memory. Use minified deployment first, then consider a reboot with device-change permission. Get current source-size statistics from the minifier rather than cached byte counts.
 - **Config namespace:** Each script's `@config` keys live in its own app store (`Anothertime.sc` ≠ `Weather.sc`). No prefix needed.
@@ -93,4 +96,4 @@ For a fresh clone or missing AWTRIX skill, follow `README.md#agent-setup`.
 
 ### GitHub Actions
 
-Preserve SHA-pinned actions, `persist-credentials: false`, explicit permissions and environment pass-through for shell inputs when editing `.github/workflows/release.yml`.
+Preserve SHA-pinned actions, `persist-credentials: false`, explicit least-privilege permissions and environment pass-through for shell inputs when editing `.github/workflows/release.yml` or `.github/workflows/release-validation.yml`. Review action pins periodically; both workflows currently use `ubuntu-24.04` and Node 24-compatible action releases.
