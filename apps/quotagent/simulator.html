@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Quotagent display simulator</title>
+  <style>
+    :root { color-scheme: light; font: 14px/1.4 system-ui, sans-serif; color: #202720; background: #f3f6f2; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 28px 16px; }
+    main { width: min(100%, 620px); margin: auto; }
+    h1 { margin: 0 0 5px; font-size: 20px; letter-spacing: -.03em; }
+    .intro { margin: 0 0 18px; color: #637064; }
+    .device { overflow-x: auto; padding: 14px; border: 1px solid #dce4da; border-radius: 12px; background: #fff; }
+    .labels { width: min(100%, 512px); height: 18px; margin: 0 auto 7px; position: relative; color: #59655a; font-size: 12px; font-weight: 650; }
+    .labels span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+    canvas { display: block; width: min(100%, 512px); height: auto; margin: auto; image-rendering: pixelated; background: #000; border-radius: 9px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    .mode { margin: 0 0 12px; padding: 0; border: 0; }
+    .mode legend { margin-bottom: 5px; font-weight: 700; }
+    .mode label { display: inline-flex; align-items: center; gap: 5px; margin-right: 16px; }
+    .threshold { max-width: 12rem; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 12px; margin-top: 14px; }
+    fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid #dce4da; border-radius: 10px; }
+    legend { padding: 0 5px; font-weight: 700; }
+    label { display: block; margin: 0 0 9px; color: #59655a; font-size: 12px; }
+    input[type="number"] { display: block; width: 100%; margin-top: 3px; padding: 7px 8px; border: 1px solid #ccd6cb; border-radius: 6px; color: #202720; font: inherit; background: #fff; }
+    input:focus-visible, button:focus-visible { outline: 2px solid #258549; outline-offset: 2px; }
+    button { width: 100%; padding: 8px; border: 0; border-radius: 6px; color: white; background: #267b42; font: inherit; font-weight: 650; cursor: pointer; }
+    button:hover { background: #1d6535; }
+    .readout { margin: 10px 0 0; color: #59655a; font-size: 12px; text-align: center; }
+    @media (max-width: 460px) { body { padding: 18px 10px; } .controls { gap: 8px; } fieldset { padding: 9px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Quotagent simulator</h1>
+  <p class="intro">Adjust quota windows and preview the 32 × 8 display.</p>
+  <fieldset class="mode">
+    <legend>Display mode</legend>
+    <label><input type="radio" name="mode" value="1"> One window</label>
+    <label><input type="radio" name="mode" value="2" checked> Two windows</label>
+  </fieldset>
+  <fieldset class="mode">
+    <legend>Bar colors</legend>
+    <label class="threshold">Low quota threshold (%)<input id="low-threshold" type="number" min="0" max="100" step="any" value="20"></label>
+    <label>Low quota <input id="low-color" type="color" value="#ff4040"></label>
+    <label>Behind pace <input id="behind-color" type="color" value="#ff8b32"></label>
+    <label>On pace <input id="on-pace-color" type="color" value="#40df75"></label>
+  </fieldset>
+  <section class="device" aria-label="Simulated display">
+    <div class="labels" aria-hidden="true"><span></span><span></span></div>
+    <canvas id="display" width="640" height="160" role="img" aria-label="Quota display preview"></canvas>
+    <p class="sr-only" id="display-description" aria-live="polite"></p>
+  </section>
+  <section class="controls" aria-label="Quota controls">
+    <fieldset data-slot="0">
+      <legend>Window 1</legend>
+      <label>Duration (hours)<input name="duration" type="number" min="0" step="any" value="5"></label>
+      <label>Remaining (%)<input name="percent" type="number" min="0" max="100" step="any" value="28"></label>
+      <label>Reset delay (hours)<input name="delay" type="number" min="0" step="any" value="1.9"></label>
+      <button type="button">Reset defaults</button>
+      <p class="readout" aria-live="polite"></p>
+    </fieldset>
+    <fieldset data-slot="1">
+      <legend>Window 2</legend>
+      <label>Duration (days)<input name="duration" type="number" min="0" step="any" value="7"></label>
+      <label>Remaining (%)<input name="percent" type="number" min="0" max="100" step="any" value="38"></label>
+      <label>Reset delay (days)<input name="delay" type="number" min="0" step="any" value="1.5"></label>
+      <button type="button">Reset defaults</button>
+      <p class="readout" aria-live="polite"></p>
+    </fieldset>
+  </section>
+</main>
+<script>
+(() => {
+  "use strict";
+  const GLYPHS = { "0":"75557", "1":"26227", "2":"71747", "3":"71717", "4":"55711", "5":"74717", "6":"74757", "7":"71222", "8":"75757", "9":"75717", h:"44655", d:"11757", m:"00775", ".":"00001", "-":"00700" };
+  const BLACK = "#000000", GREEN = "#40DF75", ORANGE = "#FF8B32", RED = "#FF4040", DIM = "#3B3B3B", WHITE = "#FFFFFF";
+  const DEFAULT_COLORS = { low: RED, behind: ORANGE, onPace: GREEN };
+  const roundHalfUp = n => Math.floor(n + 0.5);
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  function countdown(seconds, durationSeconds) {
+    if (!Number.isFinite(seconds) || seconds <= 0) return "---";
+    if (seconds >= 999 * 86400) return "999d";
+    if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))}m`;
+    if (seconds < 86400) {
+      const hours = Math.floor(seconds / 3600);
+      if (durationSeconds < 86400 && seconds < 36000)
+        return `${hours}h${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}`;
+      return `${hours}h`;
+    }
+    const tenths = roundHalfUp(seconds / 8640);
+    return tenths < 100 ? `${(tenths / 10).toFixed(1)}d` : `${Math.max(10, Math.floor(seconds / 86400))}d`;
+  }
+  function renderState(slot, lowThreshold, colors = DEFAULT_COLORS) {
+    const { duration, percent, delay, width } = slot;
+    const durationSeconds = duration * slot.secondsPerUnit, delaySeconds = delay * slot.secondsPerUnit;
+    if (![durationSeconds, percent, delaySeconds].every(Number.isFinite) || durationSeconds <= 0 || percent < 0 || percent > 100 || delaySeconds <= 0)
+      return { text: "---", valid: false };
+    const pace = Math.min(delaySeconds, durationSeconds), ratio = pace / durationSeconds;
+    return {
+      text: countdown(delaySeconds, durationSeconds),
+      fill: clamp(roundHalfUp(percent * width / 100), 0, width),
+      marker: roundHalfUp(ratio * (width - 1)),
+      color: percent < lowThreshold ? colors.low : pace * 100 > (percent + 5) * durationSeconds ? colors.behind : colors.onPace,
+      valid: true
+    };
+  }
+  function glyphRows(text) { return text.toLowerCase().split("").map(ch => GLYPHS[ch] || GLYPHS["-"]); }
+  function draw(ctx, slots, lowThreshold, colors) {
+    ctx.fillStyle = BLACK; ctx.fillRect(0, 0, 32, 8);
+    return slots.map(slot => {
+      const state = renderState(slot, lowThreshold, colors), rows = glyphRows(state.text);
+      const widths = rows.map(glyph => glyph === GLYPHS["."] ? 1 : 3);
+      const textWidth = widths.reduce((sum, width) => sum + width, 0) + rows.length - 1;
+      let x = slot.x + Math.floor((slot.width - textWidth) / 2);
+      rows.forEach((glyph, index) => {
+        const gw = widths[index];
+        for (let y = 0; y < 5; y++) for (let col = 0; col < gw; col++)
+          if ((Number(glyph[y]) & (1 << (gw - 1 - col))) !== 0) {
+            ctx.fillStyle = WHITE; ctx.fillRect(x + col, y, 1, 1);
+          }
+        x += gw + 1;
+      });
+      if (!state.valid) return state;
+      for (let i = 0; i < slot.width; i++) {
+        ctx.fillStyle = i < state.fill ? state.color : DIM;
+        ctx.fillRect(slot.x + i, 6, 1, 1); ctx.fillRect(slot.x + i, 7, 1, 1);
+      }
+      ctx.fillStyle = WHITE;
+      ctx.fillRect(slot.x + state.marker, 6, 1, 1); ctx.fillRect(slot.x + state.marker, 7, 1, 1);
+      return state;
+    });
+  }
+  function check(condition, message) { if (!condition) throw new Error(`Self-check failed: ${message}`); }
+  function runChecks() {
+    const slot = { x: 0, width: 15, secondsPerUnit: 3600, duration: 5, percent: 28, delay: 1.9 };
+    const state = renderState(slot);
+    check(state.fill === 4, "fill rounds 4.2 to 4");
+    check(state.marker === 5, "marker uses reset-delay ratio (5.32 rounds to 5)");
+    check(state.color === ORANGE, "delta compares quota percent to clamped reset ratio");
+    check(renderState({ ...slot, duration: 3600, percent: 50, delay: 1980, secondsPerUnit: 1 }).color === GREEN,
+      "exact -5 point pace boundary stays green");
+    const low = { ...slot, percent: 15, delay: 0.5 };
+    check(renderState(low, 20).color === RED && renderState(low, 0).color === GREEN,
+      "low quota overrides pace and a zero threshold disables it");
+    check(renderState({ ...low, percent: 20 }, 20).color === GREEN, "the low-quota threshold is exclusive");
+    check(renderState(low, 20, { ...DEFAULT_COLORS, low: "#123456" }).color === "#123456", "custom low-quota color");
+    check(renderState({ ...slot, percent: 0 }).valid, "zero percent remains a valid slot");
+    check(renderState({ ...slot, delay: 6 }).marker === 14, "marker clamps at the right edge");
+    check(countdown(59.9 * 60, 5 * 3600) === "59m", "minutes floor");
+    check(countdown(30, 5 * 3600) === "1m", "positive sub-minute countdown clamps to one");
+    check(countdown(2 * 3600 + 5 * 60 + 59, 5 * 3600) === "2h05", "short-window hour format");
+    check(countdown(9.96 * 86400, 14 * 86400) === "10d", "fractional day rounding is preserved");
+    check(countdown(999 * 86400, 1200 * 86400) === "999d", "extreme countdown is capped");
+    check(renderState({ ...slot, duration: NaN }).text === "---", "invalid slot");
+    check(!renderState({ ...slot, delay: 0 }).valid, "expired slot has no bar");
+    const pixels = [];
+    const ctx = { fillStyle: "", fillRect(x, y, w, h) { pixels.push([x,y,w,h,this.fillStyle]); } };
+    draw(ctx, [{ ...slot, text: undefined }]);
+    check(pixels.some(([,y,,,color]) => y < 5 && color === WHITE), "glyph pixels render white");
+    check(!pixels.some(([,y]) => y === 5) &&
+      [6, 7].every(row => pixels.some(([x,y,,,color]) => x === 5 && y === row && color === WHITE)),
+      "two-pixel white marker leaves a blank row under the countdown");
+    check(pixels.length > 40 && pixels.slice(1).every(([, , w, h]) => w === 1 && h === 1), "matrix uses individual square pixels");
+  }
+  window.QuotagentRenderer = Object.freeze({ renderState, countdown, draw, glyphRows, runChecks });
+  runChecks();
+
+  const canvas = document.querySelector("#display"), ctx = canvas.getContext("2d");
+  const lowThreshold = document.querySelector("#low-threshold");
+  const lowColor = document.querySelector("#low-color"), behindColor = document.querySelector("#behind-color");
+  const onPaceColor = document.querySelector("#on-pace-color");
+  const pitch = canvas.width / 32;
+  const preview = {
+    fillStyle: BLACK,
+    fillRect(x, y, width, height) {
+      ctx.fillStyle = width === 32 && height === 8 ? "#202020" : this.fillStyle;
+      for (let row = y; row < y + height; row++)
+        for (let col = x; col < x + width; col++)
+          ctx.fillRect(col * pitch + 2, row * pitch + 2, pitch - 4, pitch - 4);
+    }
+  };
+  const fields = [...document.querySelectorAll(".controls fieldset")], labels = [...document.querySelectorAll(".labels span")];
+  const modes = [...document.querySelectorAll('input[name="mode"]')];
+  const specs = [{ x: 0, width: 15, secondsPerUnit: 3600, unit: "h" }, { x: 17, width: 15, secondsPerUnit: 86400, unit: "d" }];
+  function update() {
+    const count = Number(modes.find(input => input.checked).value);
+    const slots = fields.slice(0, count).map((field, i) => {
+      const value = name => field.elements.namedItem(name).valueAsNumber;
+      return { ...specs[i], x: count === 1 ? 0 : specs[i].x, width: count === 1 ? 32 : specs[i].width,
+        duration: value("duration"), percent: value("percent"), delay: value("delay") };
+    });
+    const states = draw(preview, slots, clamp(lowThreshold.valueAsNumber, 0, 100),
+      { low: lowColor.value, behind: behindColor.value, onPace: onPaceColor.value });
+    labels.forEach((label, i) => {
+      const slot = slots[i], field = fields[i];
+      label.hidden = !slot;
+      if (slot) {
+        label.style.left = `${(slot.x + slot.width / 2) / 32 * 100}%`;
+        label.textContent = `${field.elements.namedItem("duration").value || "—"}${slot.unit}`;
+      }
+    });
+    fields.forEach((field, i) => {
+      const state = states[i], slot = slots[i];
+      field.hidden = !slot;
+      if (slot) field.querySelector(".readout").textContent = state.valid
+        ? `${slot.percent}% remaining · reset ${state.text}` : "Unavailable";
+    });
+    document.querySelector("#display-description").textContent = slots.map((slot, i) =>
+      `Window ${i + 1}: ${states[i].valid ? `${slot.percent}% remaining, reset ${states[i].text}` : "unavailable"}`).join(". ");
+  }
+  fields.forEach(field => {
+    field.addEventListener("input", update);
+    field.querySelector("button").addEventListener("click", () => {
+      const defaults = field.dataset.slot === "0" ? ["5", "28", "1.9"] : ["7", "38", "1.5"];
+      ["duration", "percent", "delay"].forEach((name, i) => field.elements.namedItem(name).value = defaults[i]);
+      update();
+    });
+  });
+  modes.forEach(input => input.addEventListener("change", update));
+  [lowThreshold, lowColor, behindColor, onPaceColor].forEach(input => input.addEventListener("input", update));
+  update();
+})();
+</script>
+</body>
+</html>

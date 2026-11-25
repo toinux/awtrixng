@@ -1,0 +1,8 @@
+[project]
+name = "quotagent"
+version = "1.0.0"
+
+[[scripts]]
+name = "Quotagent"
+file = "src/quotagent.ax"
+create = true

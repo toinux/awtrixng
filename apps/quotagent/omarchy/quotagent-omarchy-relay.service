@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish Omarchy Codex quota to MQTT
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/quotagent/relay.py
+Environment=XDG_STATE_HOME=%S
+Environment=XDG_CONFIG_HOME=%E
+Environment=MQTT_TOPIC=quotagent/status
+EnvironmentFile=-%E/quotagent/mqtt.env
+
+[Install]
+WantedBy=default.target

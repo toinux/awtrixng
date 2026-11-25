@@ -12,6 +12,7 @@ These scripts run directly on the device and join the app rotation. Clock and on
 |--------|-------------|---------|
 | **[Anothertime](#anothertime)** | Always-on time display with rotating widgets (date, temperature, humidity, battery) and a week indicator | 1.4.0 |
 | **[Tesla](#tesla)** | TeslaMate battery level, charging power and animated plug | 1.6.0 |
+| **[Quotagent](#quotagent)** | One or two usage quotas with countdowns and pace markers over MQTT | 1.0.0 |
 
 ---
 
@@ -89,6 +90,18 @@ AWTRIX NG v1.1.1+ has no fixed script size limit: an install needs enough contig
 Set **Car** (`id`) to the TeslaMate car ID and **Namespace** (`ns`) if used. Colors, flow speed, trail length and view duration are configurable through the app settings. A missing, invalid or negative power value leaves the percentage displayed; power is never displayed outside active charging.
 
 Install with `./deploy.sh tesla`, or paste the complete source into a script named `Tesla` in the web UI. Deployment requires `AWTRIX_IP` and optional `AWTRIX_AUTH` in `.env`. The script creates only by default; use `./deploy.sh tesla --force` to replace an installed app without remote-change protection.
+
+---
+
+## Quotagent
+
+[`quotagent.ax`](apps/quotagent/src/quotagent.ax) shows one quota across the panel or two side by side. The white two-pixel tick shows how much quota would remain at an even pace. The three bar colors are configurable: **On pace** (green), **Behind pace** (orange, more than five percentage points below pace), and **Low quota** (red). Low quota takes priority below **Low quota threshold (%)** (default `20`; `0` disables it).
+
+Install with `./deploy.sh quotagent`, then configure **MQTT topic** on the app to match your publisher. By default it joins the regular rotation. Enable **Show on change** to skip regular turns and show a five-second notification when a known percentage changes, without switching the active app. The first reading, a layout change, and a reset timestamp change alone do not trigger a notification.
+
+- [MQTT publisher contract](apps/quotagent/MQTT.md): exact format, invalid data rules and a test publisher.
+- [Omarchy setup](apps/quotagent/omarchy/README.md): optional Codex relay, no polling.
+- [Pixel simulator](apps/quotagent/simulator.html): open locally without a panel.
 
 ---
 

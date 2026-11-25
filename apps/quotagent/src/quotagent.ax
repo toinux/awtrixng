@@ -1,0 +1,218 @@
+# @name Quotagent
+# @version 1.0.0
+# @config topic text "MQTT topic" default="quotagent/status"
+# @config onchange bool "Show on change" default=false
+# @config redbelow number "Low quota threshold (%)" default=20 min=0 max=100 unit=%
+# @config lowcolor color "Low quota color" default=#FF4040
+# @config behindcolor color "Behind pace color" default=#FF8B32
+# @config onpacecolor color "On pace color" default=#40DF75
+
+import json
+
+class Quotagent
+  var slots, labels, fills, markers, colors
+
+  def init()
+    self.slots = []
+    self.labels = ["---", "---"]
+    self.fills = [0, 0]
+    self.markers = [-1, -1]
+    self.colors = [0, 0]
+  end
+
+  def setup()
+    mqtt.subscribe(store.get("topic"), / topic, payload -> self.receive(payload))
+  end
+
+  def receive(payload)
+    var next = []
+    try
+      var data = json.load(payload)
+      if isinstance(data, map) && isinstance(data["windows"], list)
+        var windows = data["windows"]
+        if size(windows) == 1 || size(windows) == 2
+          for item : windows
+            var slot = nil
+            try
+              if isinstance(item, map)
+                var duration = item["durationSeconds"]
+                var percent = item["remainingPercent"]
+                var reset = item["resetAt"]
+                if (type(duration) == "int" || type(duration) == "real") &&
+                   (type(percent) == "int" || type(percent) == "real") &&
+                   (type(reset) == "int" || type(reset) == "real") &&
+                   duration > 0 && duration - duration == 0 &&
+                   percent >= 0 && percent <= 100 &&
+                   reset > 0 && reset - reset == 0
+                  slot = [duration, percent, reset]
+                end
+              end
+            except ..
+            end
+            next.push(slot)
+          end
+        end
+      end
+    except ..
+      next = []
+    end
+
+    var changed = false
+    var same = size(next) > 0 && size(next) == size(self.slots)
+    if same
+      for i : 0 .. size(next) - 1
+        if next[i] != nil && self.slots[i] != nil && next[i][0] != self.slots[i][0]
+          same = false
+        end
+      end
+    end
+    if same
+      var now = epoch_ms() / 1000
+      if now > 0
+        for i : 0 .. size(next) - 1
+          if next[i] != nil && self.slots[i] != nil && next[i][2] > now && next[i][1] != self.slots[i][1]
+            changed = true
+          end
+        end
+      end
+    end
+    self.slots = next
+    self.loop()
+    if changed && store.get("onchange")
+      self.notify_snapshot()
+    end
+  end
+
+  def should_show()
+    return !store.get("onchange")
+  end
+
+  def loop()
+    var now = epoch_ms()
+    var low_threshold = store.get("redbelow")
+    for i : 0 .. 1
+      self.labels[i] = "---"
+      self.fills[i] = 0
+      self.markers[i] = -1
+      if i < size(self.slots) && self.slots[i] != nil && now >= 0
+        var slot = self.slots[i]
+        var remaining = slot[2] - now / 1000
+        if remaining > 0
+          var w = size(self.slots) == 1 ? 32 : 15
+          var pace = remaining < slot[0] ? remaining : slot[0]
+          var ratio = pace / (slot[0] * 1.0)
+          var pct = slot[1]
+          self.fills[i] = int(pct * w / 100.0 + 0.5)
+          self.markers[i] = int(ratio * (w - 1) + 0.5)
+          if pct < low_threshold
+            self.colors[i] = store.get("lowcolor")
+          else
+            # Compare before dividing so an exact five-point deficit stays green.
+            self.colors[i] = store.get(pace * 100.0 > (pct + 5.0) * slot[0] ? "behindcolor" : "onpacecolor")
+          end
+          if remaining >= 999 * 86400
+            self.labels[i] = "999d"
+          elif remaining >= 86400
+            var tenths = int(remaining / 8640.0 + 0.5)
+            if tenths < 100
+              self.labels[i] = str(tenths / 10) + "." + str(tenths % 10) + "d"
+            else
+              var days = int(remaining / 86400)
+              if days < 10 days = 10 end
+              self.labels[i] = str(days) + "d"
+            end
+          elif remaining >= 3600
+            var hours = int(remaining / 3600)
+            if slot[0] < 86400 && hours < 10
+              var mins = int(remaining / 60) % 60
+              self.labels[i] = str(hours) + "h" + (mins < 10 ? "0" : "") + str(mins)
+            else
+              self.labels[i] = str(hours) + "h"
+            end
+          else
+            var mins = int(remaining / 60)
+            if mins < 1 mins = 1 end
+            self.labels[i] = str(mins) + "m"
+          end
+        end
+      end
+    end
+  end
+
+  def draw()
+    clear()
+    self.paint(pixel)
+  end
+
+  def notify_snapshot()
+    var commands = []
+    var by_color = {}
+    self.paint(def (x, y, color)
+      var group = by_color.find(color)
+      if group == nil
+        group = ["pixels", color]
+        by_color[color] = group
+        commands.push(group)
+      end
+      group.push(x)
+      group.push(y)
+    end)
+    notify({"durationMs": 5000, "draw": commands})
+  end
+
+  def paint(paint_pixel)
+    var count = size(self.slots)
+    if count == 0 count = 1 end
+    for i : 0 .. count - 1
+      var x = i * 17
+      var w = count == 1 ? 32 : 15
+      var label = self.labels[i]
+      var ink = 0
+      for j : 0 .. size(label) - 1
+        ink += label[j] == "." ? 1 : 3
+        if j > 0 ink += 1 end
+      end
+      var px = x + (w - ink) / 2
+      for j : 0 .. size(label) - 1
+        var c = label[j]
+        var rows = "00000"
+        if c == "0" rows = "75557"
+        elif c == "1" rows = "26227"
+        elif c == "2" rows = "71747"
+        elif c == "3" rows = "71717"
+        elif c == "4" rows = "55711"
+        elif c == "5" rows = "74717"
+        elif c == "6" rows = "74757"
+        elif c == "7" rows = "71222"
+        elif c == "8" rows = "75757"
+        elif c == "9" rows = "75717"
+        elif c == "h" rows = "44655"
+        elif c == "d" rows = "11757"
+        elif c == "m" rows = "00775"
+        elif c == "." rows = "00001"
+        elif c == "-" rows = "00700"
+        end
+        var cw = c == "." ? 1 : 3
+        for y : 0 .. 4
+          var bits = int(rows[y])
+          for col : 0 .. cw - 1
+            if (bits & (1 << (cw - 1 - col))) != 0
+              paint_pixel(px + col, y, 0xFFFFFF)
+            end
+          end
+        end
+        px += cw + 1
+      end
+      if self.markers[i] >= 0
+        for col : 0 .. w - 1
+          var color = col < self.fills[i] ? self.colors[i] : 0x3B3B3B
+          if col == self.markers[i] color = 0xFFFFFF end
+          paint_pixel(x + col, 6, color)
+          paint_pixel(x + col, 7, color)
+        end
+      end
+    end
+  end
+end
+
+return Quotagent()
