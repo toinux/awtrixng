@@ -1,8 +1,9 @@
 [Unit]
-Description=Watch Omarchy Codex quota cache
+Description=Watch Omarchy and OpenCode Quota exports
 
 [Path]
 PathChanged=%S/omarchy/agents/usage/codex.json
+PathChanged=%C/opencode/quota-export.json
 Unit=quotagent-omarchy-relay.service
 
 [Install]
