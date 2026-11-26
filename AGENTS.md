@@ -66,7 +66,7 @@
 
 ## Script conventions (AWTRIX-specific)
 
-- Read `.agents/skills/awtrix-berry-app/SKILL.md` and its `references/awtrix-api.md` before writing or changing a `.ax` file. If the installed skill is missing, follow `README.md#agent-setup`. That skill is the source of truth for the API, install and verification flow.
+- Before editing a `.ax` file, follow `.agents/skills/awtrix-berry-app/SKILL.md` and load only the references it points to for the task. That skill is the source of truth for the Berry API; use the `awtrix-cli` skill for supported device operations. If the local skill is missing, see [`README.md#agent-setup`](README.md#agent-setup) and ask before installing it.
 - Header tags (`# @name`, `# @version`, `# @config …`, `# @icons …`) must stay at the top of the file: the parser stops reading tags at the first line that is neither blank nor a comment, so they cannot sit below the `import`.
 - Anything the user might change is a `# @config` field read with `store.get(key)` — never a hardcoded constant, and never repeat the default in code.
 - AWTRIX NG v1.1.1+ has no fixed script-size cap; older limits in the installed skill do not apply to those versions. The shared Berry heap is 96 KB without PSRAM. Installation requires contiguous source memory plus compile headroom (roughly 8 KB); `507` indicates insufficient or fragmented memory. Use minified deployment first, then consider a reboot with device-change permission. Get current source-size statistics from the minifier rather than cached byte counts.

@@ -126,7 +126,20 @@ Successful minification does not verify Berry syntax. A script that fails to com
 
 ### Agent setup
 
-Install the upstream [`awtrix-berry-app` skill](https://blueforcer.github.io/awtrix-ng/guides/ai-prompt/#as-an-agent-skill) into `.agents/skills/` for this project, so `.agents/skills/awtrix-berry-app/SKILL.md` and `references/awtrix-api.md` are available. Installed skills are ignored by Git; a fresh clone needs this setup. Repo-specific firmware notes in [`AGENTS.md`](AGENTS.md#script-conventions-awtrix-specific) take precedence over older size limits in the upstream reference.
+Run from the repo root with Python 3 on Linux or macOS:
+
+```sh
+python3 tools/berry-skill.py check    # compare with the current official ZIP, without writing
+python3 tools/berry-skill.py install  # install on a fresh clone or update in place
+```
+
+This installs a project-local adaptation of [Blueforcer’s official Berry skill](https://blueforcer.github.io/awtrix-ng/esp32/guides/ai-prompt/#as-an-agent-skill) at `.agents/skills/awtrix-berry-app/`. Start a fresh agent session if your current one already loaded the skill. The generated `SKILL.md` sends the agent to the relevant API topics; `awtrix-cli` still handles supported device operations. Firmware notes in [`AGENTS.md`](AGENTS.md#script-conventions-awtrix-specific) take precedence over older upstream size limits.
+
+- **Check:** exit `0` means current, `1` means missing or different, `2` means the ZIP could not be fetched or processed. Nothing runs automatically during a Berry task.
+- **Update:** `install` replaces the local skill directory when generated files differ. Save any hand edits you want to keep first. The tool validates and stages the replacement before moving the current copy; a structure error leaves your current copy in place.
+- **Offline or repeatable install:** append `--archive /path/to/official.zip` to either command. The installed `UPSTREAM.md` records Blueforcer’s notice, the license and the ZIP SHA-256, which identifies the exact input even if the download is replaced upstream.
+
+The [installer and heading rules](tools/berry-skill.py) and the [entry template](tools/berry-skill.md) are versioned. The generated skill is ignored by Git and intended for local use under its upstream license. If upstream changes the layout, review the official ZIP, adjust the rules and index together, and run `python3 -m unittest discover -s tools -p 'test_berry_skill.py'`.
 
 ### Releases
 
